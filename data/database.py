@@ -1,14 +1,17 @@
 import pandas as pd
-from sqlalchemy import create_engine
+import os
+from sqlalchemy import create_engine, inspect, text
 import traceback
+from dotenv import load_dotenv
 
-def get_db_config():
-    return {
-        'host': 'localhost',
-        'database': 'BI_GORE',
-        'user': 'postgres',
-        'password': 'postgre123'
-    }
+# Carrega variáveis do .env
+load_dotenv()
+
+DATABASE_URL = os.getenv('DATABASE_URL')
+if not DATABASE_URL:
+    raise RuntimeError("A variável de ambiente DATABASE_URL não está definida!")
+
+engine = create_engine(DATABASE_URL)
 
 def execute_query(query, params=None):
     """Executa uma query e retorna um DataFrame"""
@@ -17,12 +20,6 @@ def execute_query(query, params=None):
     print(f"Parâmetros: {params}")
     
     try:
-        config = get_db_config()
-        connection_string = f"postgresql://{config['user']}:{config['password']}@{config['host']}/{config['database']}"
-        
-        print("Criando conexão com o banco...")
-        engine = create_engine(connection_string)
-        
         print("Executando query...")
         if params:
             # Converter os parâmetros para o formato correto

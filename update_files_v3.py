@@ -1,4 +1,5 @@
 import os
+import time
 
 def update_project_files():
     base_path = r"C:\falcao\GORE"
@@ -109,14 +110,19 @@ app.layout = html.Div([
     Input('url', 'pathname')
 )
 def display_page(pathname):
-    if pathname == '/':
+    start = time.time()
+    print('[PERF] Callback: display_page - INÍCIO')
+    try:
+        if pathname == '/':
+            return create_home_layout()
+        elif pathname == '/atendimentos':
+            return html.Div([
+                create_navbar(),
+                atendimentos.create_layout()
+            ])
         return create_home_layout()
-    elif pathname == '/atendimentos':
-        return html.Div([
-            create_navbar(),
-            atendimentos.create_layout()
-        ])
-    return create_home_layout()
+    finally:
+        print(f'[PERF] Callback: display_page - FIM - Tempo: {time.time() - start:.3f}s')
 
 if __name__ == '__main__':
     app.run_server(debug=True)
@@ -206,8 +212,10 @@ from components.cards import create_metric_card
 import dash_bootstrap_components as dbc
 
 def get_atendimentos_data(year, month):
-    conn = get_db_connection()
+    start = time.time()
+    print('[PERF] Query: get_atendimentos_data - INÍCIO')
     try:
+        conn = get_db_connection()
         # Construir a query base
         where_clauses = []
         if year != 'todos':
@@ -258,7 +266,7 @@ def get_atendimentos_data(year, month):
         var_media = ((media_diaria - media_diaria_anterior) / media_diaria_anterior * 100) if media_diaria_anterior > 0 else 0
         var_projecao = ((projecao_mes - total_anterior) / total_anterior * 100) if total_anterior > 0 else 0
         
-        return {
+        result = {
             'total_atual': f"{total_atual:,.0f}",
             'total_anterior': f"{total_anterior:,.0f}",
             'var_total': f"{var_total:,.2f}%",
@@ -268,12 +276,16 @@ def get_atendimentos_data(year, month):
             'projecao': f"{projecao_mes:,.0f}",
             'var_projecao': f"{var_projecao:,.2f}%"
         }
+        return result
     finally:
         conn.close()
+        print(f'[PERF] Query: get_atendimentos_data - FIM - Tempo: {time.time() - start:.3f}s')
 
 def get_evolucao_data(year):
-    conn = get_db_connection()
+    start = time.time()
+    print('[PERF] Query: get_evolucao_data - INÍCIO')
     try:
+        conn = get_db_connection()
         # Se year for 'todos', pegamos os últimos 2 anos
         if year == 'todos':
             query = """
@@ -303,9 +315,11 @@ def get_evolucao_data(year):
                 GROUP BY EXTRACT(YEAR FROM data), EXTRACT(MONTH FROM data)
                 ORDER BY ano, mes
             """
-        return pd.read_sql_query(query, conn)
+        result = pd.read_sql_query(query, conn)
+        return result
     finally:
         conn.close()
+        print(f'[PERF] Query: get_evolucao_data - FIM - Tempo: {time.time() - start:.3f}s')
 
 @app.callback(
     Output('metrics-container', 'children'),
@@ -313,97 +327,96 @@ def get_evolucao_data(year):
      Input('month-dropdown', 'value')]
 )
 def update_metrics(year, month):
-    if not year or not month:
-        return []
-    
-    data = get_atendimentos_data(year, month)
-    
-    return dbc.Row([
-        dbc.Col(create_metric_card(
-            "Qtde Acum Mês do Ano Atual",
-            data['total_atual'],
-            data['total_anterior'],
-            data['var_total']
-        ), width=4),
-        dbc.Col(create_metric_card(
-            "Qtde Méd Diária Mês do Ano Atual",
-            data['media_diaria'],
-            data['media_anterior'],
-            data['var_media']
-        ), width=4),
-        dbc.Col(create_metric_card(
-            "Proj Qtde p/ Mês do Ano Atual",
-            data['projecao'],
-            data['total_anterior'],
-            data['var_projecao']
-        ), width=4)
-    ])
+    start = time.time()
+    print('[PERF] Callback: update_metrics - INÍCIO')
+    try:
+        if not year or not month:
+            return []
+        data = get_atendimentos_data(year, month)
+        return dbc.Row([
+            dbc.Col(create_metric_card(
+                "Qtde Acum Mês do Ano Atual",
+                data['total_atual'],
+                data['total_anterior'],
+                data['var_total']
+            ), width=4),
+            dbc.Col(create_metric_card(
+                "Qtde Méd Diária Mês do Ano Atual",
+                data['media_diaria'],
+                data['media_anterior'],
+                data['var_media']
+            ), width=4),
+            dbc.Col(create_metric_card(
+                "Proj Qtde p/ Mês do Ano Atual",
+                data['projecao'],
+                data['total_anterior'],
+                data['var_projecao']
+            ), width=4)
+        ])
+    finally:
+        print(f'[PERF] Callback: update_metrics - FIM - Tempo: {time.time() - start:.3f}s')
 
 @app.callback(
     Output('atendimentos-graph', 'figure'),
     [Input('year-dropdown', 'value')]
 )
 def update_graph(year):
-    if not year:
-        return {}
-    
-    df = get_evolucao_data(year)
-    
-    fig = go.Figure()
-    
-    anos = df['ano'].unique()
-    anos.sort()
-    
-    for ano in anos:
-        df_ano = df[df['ano'] == ano]
-        
-        fig.add_trace(go.Scatter(
-            x=df_ano['mes'],
-            y=df_ano['total_atendimentos'],
-            name=f'Atendimentos {int(ano)}',
-            line=dict(
-                color='#1a237e' if ano == anos[-1] else '#90a4ae',
-                width=3 if ano == anos[-1] else 2,
-                dash='solid' if ano == anos[-1] else 'dash'
+    start = time.time()
+    print('[PERF] Callback: update_graph - INÍCIO')
+    try:
+        if not year:
+            return {}
+        df = get_evolucao_data(year)
+        fig = go.Figure()
+        anos = df['ano'].unique()
+        anos.sort()
+        for ano in anos:
+            df_ano = df[df['ano'] == ano]
+            fig.add_trace(go.Scatter(
+                x=df_ano['mes'],
+                y=df_ano['total_atendimentos'],
+                name=f'Atendimentos {int(ano)}',
+                line=dict(
+                    color='#1a237e' if ano == anos[-1] else '#90a4ae',
+                    width=3 if ano == anos[-1] else 2,
+                    dash='solid' if ano == anos[-1] else 'dash'
+                )
+            ))
+        fig.update_layout(
+            title='Evolução de Atendimentos',
+            xaxis_title='Mês',
+            yaxis_title='Quantidade de Atendimentos',
+            template='plotly_white',
+            hovermode='x unified',
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            ),
+            plot_bgcolor='white',
+            paper_bgcolor='white',
+            font=dict(
+                family='Segoe UI',
+                color='#2c3e50'
             )
-        ))
-    
-    fig.update_layout(
-        title='Evolução de Atendimentos',
-        xaxis_title='Mês',
-        yaxis_title='Quantidade de Atendimentos',
-        template='plotly_white',
-        hovermode='x unified',
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
-        ),
-        plot_bgcolor='white',
-        paper_bgcolor='white',
-        font=dict(
-            family='Segoe UI',
-            color='#2c3e50'
         )
-    )
-    
-    fig.update_xaxes(
-        showgrid=True,
-        gridwidth=1,
-        gridcolor='#f0f0f0',
-        ticktext=['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'],
-        tickvals=list(range(1, 13))
-    )
-    
-    fig.update_yaxes(
-        showgrid=True,
-        gridwidth=1,
-        gridcolor='#f0f0f0'
-    )
-    
-    return fig
+        fig.update_xaxes(
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='#f0f0f0',
+            ticktext=['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'],
+            tickvals=list(range(1, 13))
+        )
+        fig.update_yaxes(
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='#f0f0f0'
+        )
+        return fig
+    finally:
+        print(f'[PERF] Callback: update_graph - FIM - Tempo: {time.time() - start:.3f}s')
 ''',
         'assets/css/style.css': '''
 /* Estilos gerais */

@@ -16,8 +16,8 @@ def create_home_layout():
                 dbc.Card(
                     dbc.CardBody([
                         html.I(className="fas fa-user-clock fa-2x text-info"),
-                        html.H5("Atendimentos", className="mt-3"),
-                        dbc.CardLink("", href="/atendimentos", className="stretched-link")
+                        html.H5("Produção Médica", className="mt-3"),
+                        dbc.CardLink("", href="/Atendimentos", className="stretched-link")
                     ], className="text-center"),
                     className="menu-card h-100"
                 )
@@ -125,7 +125,7 @@ app.layout = html.Div([
 )
 def display_page(pathname):
     try:
-        if pathname == '/atendimentos':
+        if pathname and pathname.lower() == '/atendimentos':
             return atendimentos.layout()
         elif pathname == '/agendamentos':
             return html.H1("Página de Agendamentos em Construção")
@@ -154,4 +154,4 @@ def display_page(pathname):
 
 if __name__ == '__main__':
     print("Iniciando servidor...")
-    app.run_server(debug=True, port=8050)
+    app.run(debug=True, port=8050)

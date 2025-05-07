@@ -1,0 +1,159 @@
+/* Custom checkbox styles for light theme */
+.theme-light.custom-checkbox input[type="checkbox"] {
+    accent-color: #006400;  /* Dark green for light theme */
+    background-color: #006400 !important;
+    border-color: #006400 !important;
+}
+
+.theme-light.custom-checkbox input[type="checkbox"]:checked {
+    background-color: #006400 !important;
+    border-color: #006400 !important;
+}
+
+/* Custom checkbox styles for dark theme */
+.theme-dark.custom-checkbox input[type="checkbox"] {
+    accent-color: #90EE90;  /* Light green for dark theme */
+    background-color: #90EE90 !important;
+    border-color: #90EE90 !important;
+}
+
+.theme-dark.custom-checkbox input[type="checkbox"]:checked {
+    background-color: #90EE90 !important;
+    border-color: #90EE90 !important;
+}
+
+/* Common checkbox styles */
+.custom-checkbox {
+    margin-right: 0.5rem;
+    vertical-align: middle;
+}
+
+/* Override Bootstrap's default checkbox styles */
+.form-check-input:checked {
+    background-color: currentColor !important;
+    border-color: currentColor !important;
+}
+
+/* Button styles */
+.btn-secondary {
+    transition: color 0.3s ease;
+}
+
+/* Title styles */
+.fw-bold {
+    transition: color 0.3s ease;
+}
+
+/* Theme-specific title styles */
+#producao-medica-title,
+#convenios-title,
+#medicos-title,
+#procedimentos-title,
+#segmentos-title {
+    transition: color 0.3s ease;
+    font-size: 1.2rem;
+}
+
+/* Specific size for main title */
+#producao-medica-title {
+    font-size: 2.2rem;
+}
+
+/* Date picker styles for dark theme */
+[data-bs-theme="dark"] input.DateInput_input {
+    background-color: #2B3035 !important;
+    color: white !important;
+    border: 1px solid #495057 !important;
+}
+
+[data-bs-theme="dark"] .DateInput {
+    background: #2B3035 !important;
+}
+
+[data-bs-theme="dark"] .SingleDatePickerInput {
+    background-color: #2B3035 !important;
+    border: 1px solid #495057 !important;
+}
+
+[data-bs-theme="dark"] .SingleDatePickerInput__withBorder {
+    border-radius: 4px;
+    background: #2B3035 !important;
+    border: 1px solid #495057 !important;
+}
+
+/* Força o background em todos os elementos do date picker no tema escuro */
+[data-bs-theme="dark"] .DateInput,
+[data-bs-theme="dark"] .DateInput_input,
+[data-bs-theme="dark"] .SingleDatePickerInput,
+[data-bs-theme="dark"] .SingleDatePickerInput__withBorder,
+[data-bs-theme="dark"] #data_inicial,
+[data-bs-theme="dark"] #data_final {
+    background-color: #2B3035 !important;
+    color: white !important;
+}
+
+/* Estilo específico para os inputs de data */
+#data_inicial .DateInput_input,
+#data_final .DateInput_input {
+    transition: all 0.3s ease;
+}
+
+[data-bs-theme="dark"] #data_inicial .DateInput_input,
+[data-bs-theme="dark"] #data_final .DateInput_input {
+    background-color: #2B3035 !important;
+    color: white !important;
+    border: 1px solid #495057 !important;
+}
+
+/* Calendar popup in dark theme */
+[data-bs-theme="dark"] .DayPicker {
+    background: #2B3035 !important;
+}
+
+[data-bs-theme="dark"] .CalendarMonth {
+    background: #2B3035 !important;
+}
+
+[data-bs-theme="dark"] .CalendarMonth_caption {
+    color: white !important;
+}
+
+[data-bs-theme="dark"] .DayPicker_weekHeader {
+    color: white !important;
+}
+
+[data-bs-theme="dark"] .CalendarDay {
+    background: #2B3035 !important;
+    color: white !important;
+    border: 1px solid #495057 !important;
+}
+
+[data-bs-theme="dark"] .CalendarDay:hover {
+    background: #343a40 !important;
+    border-color: #90EE90 !important;
+}
+
+[data-bs-theme="dark"] .CalendarDay__selected {
+    background: #90EE90 !important;
+    color: black !important;
+}
+
+.DateInput_input {
+    background-color: #2B3035 !important;
+}
+
+.SingleDatePickerInput {
+    background-color: #2B3035 !important;
+}
+
+/* Date inputs in light theme */
+[data-bs-theme="light"] input.DateInput_input {
+    background-color: #FFFFFF !important;
+    color: #000000 !important;
+}
+
+/* Date inputs in dark theme */
+[data-bs-theme="dark"] input.DateInput_input {
+    background-color: #2B3035 !important;
+    color: #FFFFFF !important;
+} 

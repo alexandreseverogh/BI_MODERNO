@@ -1,4 +1,5 @@
 import os
+import time
 
 def update_project_files():
     base_path = r"C:\falcao\GORE"
@@ -138,38 +139,46 @@ def get_db_connection():
      Input('month-dropdown', 'value')]
 )
 def update_metrics(year, month):
-    conn = get_db_connection()
-    
-    # Implementar as queries necessárias aqui
-    
-    return dbc.Row([
-        dbc.Col(create_metric_card(
-            "Qtde Acum Mês do Ano Atual",
-            "1.093",
-            "1.365",
-            "-19,93%"
-        ), width=4),
-        dbc.Col(create_metric_card(
-            "Qtde Méd Diária Mês do Ano Atual",
-            "64",
-            "59",
-            "8,33%"
-        ), width=4),
-        dbc.Col(create_metric_card(
-            "Proj Qtde p/ Mês do Ano Atual",
-            "1.543",
-            "1.365",
-            "13,04%"
-        ), width=4)
-    ])
+    start = time.time()
+    print('[PERF] Callback: update_metrics - INÍCIO')
+    try:
+        conn = get_db_connection()
+        # Implementar as queries necessárias aqui
+        return dbc.Row([
+            dbc.Col(create_metric_card(
+                "Qtde Acum Mês do Ano Atual",
+                "1.093",
+                "1.365",
+                "-19,93%"
+            ), width=4),
+            dbc.Col(create_metric_card(
+                "Qtde Méd Diária Mês do Ano Atual",
+                "64",
+                "59",
+                "8,33%"
+            ), width=4),
+            dbc.Col(create_metric_card(
+                "Proj Qtde p/ Mês do Ano Atual",
+                "1.543",
+                "1.365",
+                "13,04%"
+            ), width=4)
+        ])
+    finally:
+        print(f'[PERF] Callback: update_metrics - FIM - Tempo: {time.time() - start:.3f}s')
 
 @app.callback(
     Output('atendimentos-graph', 'figure'),
     [Input('year-dropdown', 'value')]
 )
 def update_graph(year):
-    # Implementar o gráfico aqui
-    return {}
+    start = time.time()
+    print('[PERF] Callback: update_graph - INÍCIO')
+    try:
+        # Implementar o gráfico aqui
+        return {}
+    finally:
+        print(f'[PERF] Callback: update_graph - FIM - Tempo: {time.time() - start:.3f}s')
 ''',
         'data/database.py': '''
 import psycopg2
@@ -184,22 +193,24 @@ def get_db_connection():
     )
 
 def fetch_atendimentos_data(year=None, month=None):
-    conn = get_db_connection()
-    
-    query = """
-        SELECT *
-        FROM dados_bi_gore
-        WHERE 1=1
-    """
-    
-    if year:
-        query += f" AND EXTRACT(YEAR FROM data) = {year}"
-    if month:
-        query += f" AND EXTRACT(MONTH FROM data) = {month}"
-    
-    df = pd.read_sql_query(query, conn)
-    conn.close()
-    return df
+    start = time.time()
+    print('[PERF] Query: fetch_atendimentos_data - INÍCIO')
+    try:
+        conn = get_db_connection()
+        query = """
+            SELECT *
+            FROM dados_bi_gore
+            WHERE 1=1
+        """
+        if year:
+            query += f" AND EXTRACT(YEAR FROM data) = {year}"
+        if month:
+            query += f" AND EXTRACT(MONTH FROM data) = {month}"
+        df = pd.read_sql_query(query, conn)
+        return df
+    finally:
+        conn.close()
+        print(f'[PERF] Query: fetch_atendimentos_data - FIM - Tempo: {time.time() - start:.3f}s')
 ''',
         'assets/css/style.css': '''
 /* Estilos personalizados */
