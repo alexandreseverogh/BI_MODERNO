@@ -1,24 +1,26 @@
 import re
 import hashlib
+import dash
 from dash import Input, Output, State, callback, html, ALL, MATCH, ctx, no_update, clientside_callback
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
+from dash import callback_context
 import plotly.express as px
 import pandas as pd
 import time
 from dash_bootstrap_templates import ThemeSwitchAIO, load_figure_template
 from database.queries import (
-    get_especialidades,
     get_formas_pagamento,
     get_profissionais,
     get_segmentos,
+    get_tipos_atendimento,
     get_total_atendimentos,
     get_valor_total,
     get_ticket_medio,
     get_atendimentos_por_mes,
     get_top_profissionais,
     get_years,
-    get_atendimentos_por_procedimento_ano,
+    get_atendimentos_por_tipo_atendimento_ano,
     build_filter_conditions,
     engine,
     get_atendimentos_por_ano,
@@ -37,12 +39,16 @@ from sqlalchemy.engine import create_engine
 from dash import dash_table
 from functools import wraps
 import io
+from dash import dcc
+from dash import callback_context
 
 # Load the figure templates for both themes
 load_figure_template(["flatly", "darkly"])
 
 # Add debug counter
 DEBUG_COUNTER = {'populate': 0, 'sync': 0, 'dashboard': 0}
+
+SEGMENTOS_PER_PAGE = 20
 
 def sanitize_id(id_str):
     # First convert to string and strip whitespace
@@ -79,17 +85,17 @@ def format_and_sort_items(items):
 
 # Cache available data at module level with proper formatting
 AVAILABLE_YEARS = get_years()
-AVAILABLE_ESPECIALIDADES = format_and_sort_items(get_especialidades())
 AVAILABLE_PAGAMENTOS = format_and_sort_items(get_formas_pagamento())
 AVAILABLE_PROFISSIONAIS = format_and_sort_items(get_profissionais())
-# Para segmentos, garantir ordem estável por nome
+# Para segmentos, garantir ordem estável por nome e padronizar 'Em Branco'
 AVAILABLE_SEGMENTOS = sorted(format_and_sort_items(get_segmentos()), key=lambda x: x['nome'])
+AVAILABLE_TIPOS_ATENDIMENTO = format_and_sort_items(get_tipos_atendimento())
 
 # Definir listas globais ordenadas e estáveis
-ALL_ESPECIALIDADES = sorted(get_especialidades(), key=lambda x: x['nome'] if x['nome'] is not None else '')
 ALL_PAGAMENTOS = sorted(get_formas_pagamento(), key=lambda x: x['nome'] if x['nome'] is not None else '')
 ALL_PROFISSIONAIS = sorted(get_profissionais(), key=lambda x: x['nome'] if x['nome'] is not None else '')
-ALL_SEGMENTOS = sorted(get_segmentos(), key=lambda x: x['nome'] if x['nome'] is not None else '')
+ALL_SEGMENTOS = sorted(format_and_sort_items(get_segmentos()), key=lambda x: x['nome'])
+ALL_TIPOS_ATENDIMENTO = sorted(format_and_sort_items(get_tipos_atendimento()), key=lambda x: x['nome'])
 
 def log_tempo_callback(func):
     @wraps(func)
@@ -115,10 +121,8 @@ def log_tempo_query(func):
 
 @callback(
     [
-        Output("especialidades-container", "children"),
         Output("pagamentos-container", "children"),
-        Output("profissionais-container", "children"),
-        Output("segmentos-container", "children")
+        Output("profissionais-container", "children")
     ],
     [
         Input({"type": "year-checkbox", "index": ALL}, "value"),
@@ -127,96 +131,52 @@ def log_tempo_query(func):
         Input("todos-meses-checkbox", "value")
     ],
     [
-        State({"type": "especialidade-checkbox", "index": ALL}, "value"),
         State({"type": "pagamento-checkbox", "index": ALL}, "value"),
         State({"type": "profissional-checkbox", "index": ALL}, "value"),
         State({"type": "segmento-checkbox", "index": ALL}, "value"),
-        State("todos-especialidades-checkbox", "value"),
         State("todos-pagamentos-checkbox", "value"),
-        State("todos-profissionais-checkbox", "value"),
-        State("todos-segmentos-checkbox", "value")
+        State("todos-profissionais-checkbox", "value")
     ],
     prevent_initial_call=False
 )
-@log_tempo_callback
 def populate_filter_options(
     year_values, month_values, 
     todos_anos_checked, todos_meses_checked,
-    esp_states, pag_states, prof_states, segm_states,
-    todos_esp_state, todos_pag_state, todos_prof_state, todos_segm_state
+    pagamento_states, profissional_states, segmento_states,
+    todos_pagamentos_state, todos_profissionais_state
 ):
-    # Get the selected years and months
-    selected_years = []
-    if todos_anos_checked:
-        selected_years = [str(year) for year in AVAILABLE_YEARS]
-    else:
-        if year_values:  # If we have values, use them
-            selected_years = [str(year) for year, checked in zip(AVAILABLE_YEARS, year_values) if checked]
-        else:  # If no values (initial state), select all years
-            selected_years = [str(year) for year in AVAILABLE_YEARS]
-
-    selected_months = []
-    if todos_meses_checked:
-        selected_months = [str(month) for month in range(1, 13)]
-    else:
-        if month_values:  # If we have values, use them
-            selected_months = [str(month) for month, checked in zip(range(1, 13), month_values) if checked]
-        else:  # If no values (initial state), select all months
-            selected_months = [str(month) for month in range(1, 13)]
-
-    # Initialize states if they don't exist
-    if not esp_states:
-        esp_states = [True] * len(AVAILABLE_ESPECIALIDADES)
-    if not pag_states:
-        pag_states = [True] * len(AVAILABLE_PAGAMENTOS)
-    if not prof_states:
-        prof_states = [True] * len(AVAILABLE_PROFISSIONAIS)
-    if not segm_states:
-        segm_states = [True] * len(AVAILABLE_SEGMENTOS)
-
-    # Create the checkbox components with preserved states
-    especialidades_checkboxes = [
-        dbc.Checkbox(
-            id={"type": "especialidade-checkbox", "index": item['nome']},
-            label=item['nome'],
-            value=state,
-            className="d-block"
-        ) for item, state in zip(AVAILABLE_ESPECIALIDADES, esp_states)
-    ]
-
-    pagamentos_checkboxes = [
-        dbc.Checkbox(
-            id={"type": "pagamento-checkbox", "index": item['nome']},
-            label=item['nome'],
-            value=state,
-            className="d-block"
-        ) for item, state in zip(AVAILABLE_PAGAMENTOS, pag_states)
-    ]
-
-    profissionais_checkboxes = [
-        dbc.Checkbox(
-            id={"type": "profissional-checkbox", "index": item['nome']},
-            label=item['nome'],
-            value=state,
-            className="d-block"
-        ) for item, state in zip(AVAILABLE_PROFISSIONAIS, prof_states)
-    ]
-
-    segmentos_checkboxes = [
-        dbc.Checkbox(
-            id={"type": "segmento-checkbox", "index": item['nome']},
-            label=item['nome'],
-            value=state,
-            className="d-block"
-        ) for item, state in zip(AVAILABLE_SEGMENTOS, segm_states)
-    ]
-
-    return [
-        html.Div(especialidades_checkboxes, id="especialidades-checkboxes-container"),
-        html.Div(pagamentos_checkboxes, id="pagamentos-checkboxes-container"),
-        html.Div(profissionais_checkboxes, id="profissionais-checkboxes-container"),
-        html.Div(segmentos_checkboxes, id="segmentos-checkboxes-container")
-    ]
+    try:
+        pagamentos = AVAILABLE_PAGAMENTOS
+        profissionais = AVAILABLE_PROFISSIONAIS
+        # Inicializar estados corretamente
+        if not pagamento_states or len(pagamento_states) != len(pagamentos):
+            pagamento_states = [True] * len(pagamentos)
+        if not profissional_states or len(profissional_states) != len(profissionais):
+            profissional_states = [True] * len(profissionais)
+        pagamentos_checkboxes = [
+            dbc.Checkbox(
+                id={"type": "pagamento-checkbox", "index": item['nome']},
+                label=item['nome'],
+                value=state if state is not None else True,
+                className="d-block"
+            ) for item, state in zip(pagamentos, pagamento_states)
+        ]
+        profissionais_checkboxes = [
+            dbc.Checkbox(
+                id={"type": "profissional-checkbox", "index": item['nome']},
+                label=item['nome'],
+                value=state if state is not None else True,
+                className="d-block"
+            ) for item, state in zip(profissionais, profissional_states)
+        ]
+        return [
+            html.Div(pagamentos_checkboxes, id="pagamentos-checkboxes-container"),
+            html.Div(profissionais_checkboxes, id="profissionais-checkboxes-container")
+        ]
+    except Exception as e:
+        print("[ERRO] populate_filter_options:", e)
+        import traceback; traceback.print_exc()
+        return [[], []]
 
 # Improved year checkbox synchronization
 @callback(
@@ -228,36 +188,24 @@ def populate_filter_options(
 )
 @log_tempo_callback
 def sync_year_checkboxes(todos_value, year_values):
-    if not ctx.triggered:
-        # Initial state - everything selected
-        years = get_years()
-        return [[True] * len(years), True]
-    
-    trigger_id = ctx.triggered_id
+    from dash import ctx
     years = get_years()
     n_years = len(years)
-    
+    trigger_id = ctx.triggered_id
     if trigger_id == "todos-anos-checkbox":
-        # If todos_value is None or False, uncheck all
-        if not todos_value:
+        if todos_value:
+            # Desmarcar tudo
             return [[False] * n_years, False]
-        # If todos_value is True, check all
-        return [[True] * n_years, True]
+        else:
+            # Marcar tudo
+            return [[True] * n_years, True]
     else:
-        # If no year values provided, treat as all unchecked
         if not year_values:
             return [[False] * n_years, False]
-        
-        # Check if all are selected or none are selected
         all_checked = all(year_values)
-        none_checked = not any(year_values)
-        
-        if none_checked:
-            return [[False] * n_years, False]
-        elif all_checked:
-            return [[True] * n_years, True]
+        if all_checked:
+            return [year_values, True]
         else:
-            # Some are checked, some aren't
             return [year_values, False]
 
 # Improved month checkbox synchronization
@@ -270,159 +218,94 @@ def sync_year_checkboxes(todos_value, year_values):
 )
 @log_tempo_callback
 def sync_month_checkboxes(todos_value, month_values):
-    if not ctx.triggered:
-        # Initial state - everything selected
-        return [[True] * 12, True]
-    
-    trigger_id = ctx.triggered_id
+    from dash import ctx
     n_months = 12
-    
+    trigger_id = ctx.triggered_id
     if trigger_id == "todos-meses-checkbox":
-        # If todos_value is None or False, uncheck all
-        if not todos_value:
+        if todos_value:
             return [[False] * n_months, False]
-        # If todos_value is True, check all
-        return [[True] * n_months, True]
+        else:
+            return [[True] * n_months, True]
     else:
-        # If no month values provided, treat as all unchecked
         if not month_values:
             return [[False] * n_months, False]
-        
-        # Check if all are selected or none are selected
         all_checked = all(month_values)
-        none_checked = not any(month_values)
-        
-        if none_checked:
-            return [[False] * n_months, False]
-        elif all_checked:
-            return [[True] * n_months, True]
+        if all_checked:
+            return [month_values, True]
         else:
-            # Some are checked, some aren't
             return [month_values, False]
 
-# Improved specialty checkbox synchronization
-@callback(
-    [Output({"type": "especialidade-checkbox", "index": ALL}, "value"),
-     Output("todos-especialidades-checkbox", "value")],
-    [Input("todos-especialidades-checkbox", "value"),
-     Input({"type": "especialidade-checkbox", "index": ALL}, "value")],
-    prevent_initial_call=True
-)
-@log_tempo_callback
-def sync_especialidade_checkboxes(todos_value, esp_values):
-    if not ctx.triggered:
-        raise PreventUpdate
-    
-    trigger_id = ctx.triggered_id
-    n_especialidades = len(AVAILABLE_ESPECIALIDADES)
-    
-    # If triggered by individual checkbox
-    if isinstance(trigger_id, dict):
-        if not esp_values:
-            return [[False] * n_especialidades, False]
-        
-        # TODOS só deve estar marcado se realmente todas as opções estiverem marcadas
-        all_checked = all(esp_values)
-        return [esp_values, all_checked]
-    
-    # If triggered by TODOS checkbox
-    if todos_value is None:
-        raise PreventUpdate
-        
-    return [[todos_value] * n_especialidades, todos_value]
-
-# Improved payment method checkbox synchronization
 @callback(
     [Output({"type": "pagamento-checkbox", "index": ALL}, "value"),
      Output("todos-pagamentos-checkbox", "value")],
     [Input("todos-pagamentos-checkbox", "value"),
      Input({"type": "pagamento-checkbox", "index": ALL}, "value")],
-    prevent_initial_call=True
+    prevent_initial_call=False
 )
-@log_tempo_callback
-def sync_pagamento_checkboxes(todos_value, pag_values):
-    if not ctx.triggered:
-        raise PreventUpdate
-    
+def sync_pagamento_checkboxes(todos_value, pagamento_values):
+    from dash import ctx
     trigger_id = ctx.triggered_id
-    n_pagamentos = len(AVAILABLE_PAGAMENTOS)
-    
-    # If triggered by individual checkbox
-    if isinstance(trigger_id, dict):
-        if not pag_values:
-            return [[False] * n_pagamentos, False]
-        
-        # TODOS só deve estar marcado se realmente todas as opções estiverem marcadas
-        all_checked = all(pag_values)
-        return [pag_values, all_checked]
-    
-    # If triggered by TODOS checkbox
-    if todos_value is None:
-        raise PreventUpdate
-        
-    return [[todos_value] * n_pagamentos, todos_value]
+    n = len(pagamento_values)
+    def is_checked(val):
+        if isinstance(val, list):
+            return bool(val)
+        return bool(val)
+    todos_checked = is_checked(todos_value)
+    if trigger_id == "todos-pagamentos-checkbox":
+        if todos_checked:
+            return [ [True]*n, True ]
+        else:
+            return [ [False]*n, False ]
+    else:
+        all_checked = all(pagamento_values)
+        any_checked = any(pagamento_values)
+        if all_checked:
+            return [ pagamento_values, True ]
+        elif not any_checked:
+            return [ pagamento_values, False ]
+        else:
+            return [ pagamento_values, False ]
 
-# Improved professional checkbox synchronization
 @callback(
     [Output({"type": "profissional-checkbox", "index": ALL}, "value"),
      Output("todos-profissionais-checkbox", "value")],
     [Input("todos-profissionais-checkbox", "value"),
      Input({"type": "profissional-checkbox", "index": ALL}, "value")],
-    prevent_initial_call=True
+    prevent_initial_call=False
 )
 @log_tempo_callback
-def sync_profissional_checkboxes(todos_value, prof_values):
-    if not ctx.triggered:
-        raise PreventUpdate
-    
+def sync_profissional_checkboxes(todos_value, profissional_values):
+    from dash import ctx
+    import copy
     trigger_id = ctx.triggered_id
-    n_profissionais = len(AVAILABLE_PROFISSIONAIS)
-    
-    # If triggered by individual checkbox
-    if isinstance(trigger_id, dict):
-        if not prof_values:
-            return [[False] * n_profissionais, False]
-        
-        # TODOS só deve estar marcado se realmente todas as opções estiverem marcadas
-        all_checked = all(prof_values)
-        return [prof_values, all_checked]
-    
-    # If triggered by TODOS checkbox
-    if todos_value is None:
-        raise PreventUpdate
-        
-    return [[todos_value] * n_profissionais, todos_value]
-
-# Improved segmento checkbox synchronization
-@callback(
-    [Output({"type": "segmento-checkbox", "index": ALL}, "value"),
-     Output("todos-segmentos-checkbox", "value")],
-    [Input("todos-segmentos-checkbox", "value"),
-     Input({"type": "segmento-checkbox", "index": ALL}, "value")],
-    prevent_initial_call=True
-)
-@log_tempo_callback
-def sync_segmento_checkboxes(todos_value, segm_values):
-    if not ctx.triggered:
-        raise PreventUpdate
-    
-    trigger_id = ctx.triggered_id
-    # Garantir ordem estável dos segmentos
-    n_segmentos = len(AVAILABLE_SEGMENTOS)
-    
-    # If triggered by individual checkbox
-    if isinstance(trigger_id, dict):
-        if not segm_values:
-            return [[False] * n_segmentos, False]
-        # TODOS só deve estar marcado se realmente todas as opções estiverem marcadas
-        all_checked = all(segm_values)
-        return [segm_values, all_checked]
-    
-    # If triggered by TODOS checkbox
-    if todos_value is None:
-        raise PreventUpdate
-        
-    return [[todos_value] * n_segmentos, todos_value]
+    n = len(profissional_values)
+    # Dash pode passar True, False, ["TODOS"], [] ou None
+    def is_checked(val):
+        if isinstance(val, list):
+            return bool(val)
+        return bool(val)
+    todos_checked = is_checked(todos_value)
+    # Se o trigger foi o botão TODOS
+    if trigger_id == "todos-profissionais-checkbox":
+        if todos_checked:
+            # Marcar todos
+            return [ [True]*n, True ]
+        else:
+            # Desmarcar todos
+            return [ [False]*n, False ]
+    # Se o trigger foi algum individual
+    else:
+        all_checked = all(profissional_values)
+        any_checked = any(profissional_values)
+        # Se todos marcados, marcar TODOS
+        if all_checked:
+            return [ profissional_values, True ]
+        # Se nenhum marcado, desmarcar TODOS
+        elif not any_checked:
+            return [ profissional_values, False ]
+        # Se alguns marcados, desmarcar TODOS
+        else:
+            return [ profissional_values, False ]
 
 def get_color_for_year(index):
     base_colors = [
@@ -487,11 +370,11 @@ def toggle_collapse_profissionais(n, is_open):
 
 # Collapse para PROCEDIMENTOS
 @callback(
-    Output("collapse-especialidades", "is_open"),
-    Input("collapse-especialidades-btn", "n_clicks"),
-    State("collapse-especialidades", "is_open"),
+    Output("collapse-procedimentos", "is_open"),
+    Input("collapse-procedimentos-btn", "n_clicks"),
+    State("collapse-procedimentos", "is_open"),
 )
-def toggle_collapse_especialidades(n, is_open):
+def toggle_collapse_procedimentos(n, is_open):
     if n:
         return not is_open
     return is_open
@@ -514,38 +397,28 @@ def toggle_collapse_segmentos(n, is_open):
         Output("convenios-title", "style"),
         Output("medicos-title", "style"),
         Output("procedimentos-title", "style"),
-        Output("segmentos-title", "style"),
         Output("collapse-pagamentos-btn", "style"),
         Output("collapse-profissionais-btn", "style"),
-        Output("collapse-especialidades-btn", "style"),
         Output("collapse-segmentos-btn", "style"),
+        Output("collapse-procedimentos-btn", "style"),  # Adicionado para PROCEDIMENTOS
         Output("todos-anos-checkbox", "className"),
         Output("todos-meses-checkbox", "className"),
         Output("todos-pagamentos-checkbox", "className"),
         Output("todos-profissionais-checkbox", "className"),
-        Output("todos-especialidades-checkbox", "className"),
         Output("todos-segmentos-checkbox", "className")
     ],
     Input(ThemeSwitchAIO.ids.switch("theme"), "value")
 )
 def update_theme_dependent_styles(theme_toggle):
-    # White theme (toggle is True) = black text
-    # Dark theme (toggle is False) = white text
-    button_color = "#006400" if theme_toggle else "#90EE90"  # Dark green : Light green
-    title_color = "#000000" if theme_toggle else "#FFFFFF"  # Black : White
-    
-    # Estilos para os diferentes elementos
+    button_color = "#006400" if theme_toggle else "#90EE90"
+    title_color = "#000000" if theme_toggle else "#FFFFFF"
     title_style = {"color": title_color}
     button_style = {"color": button_color}
-    
-    # Classes para os checkboxes
     checkbox_class = "d-inline-block me-2 custom-checkbox " + ("theme-light" if theme_toggle else "theme-dark")
-    
-    # Retorna estilos para todos os elementos
     return (
-        [title_style] * 5 +  # Estilos dos títulos
-        [button_style] * 4 + # Estilos dos botões
-        [checkbox_class] * 6  # Classes dos checkboxes
+        [title_style] * 4 +  # Estilos dos títulos
+        [button_style] * 4 + # Agora 4 botões
+        [checkbox_class] * 5  # Classes dos checkboxes
     )
 
 @callback(
@@ -553,13 +426,13 @@ def update_theme_dependent_styles(theme_toggle):
     [
         Input({"type": "year-checkbox", "index": ALL}, "value"),
         Input({"type": "month-checkbox", "index": ALL}, "value"),
-        Input({"type": "especialidade-checkbox", "index": ALL}, "value"),
+        Input({"type": "segmento-checkbox", "index": ALL}, "value"),
         Input({"type": "pagamento-checkbox", "index": ALL}, "value"),
         Input({"type": "profissional-checkbox", "index": ALL}, "value"),
         Input({"type": "segmento-checkbox", "index": ALL}, "value"),
         Input("todos-anos-checkbox", "value"),
         Input("todos-meses-checkbox", "value"),
-        Input("todos-especialidades-checkbox", "value"),
+        Input("todos-segmentos-checkbox", "value"),
         Input("todos-pagamentos-checkbox", "value"),
         Input("todos-profissionais-checkbox", "value"),
         Input("todos-segmentos-checkbox", "value"),
@@ -572,10 +445,10 @@ def update_theme_dependent_styles(theme_toggle):
 @log_tempo_callback
 def update_atendimentos_por_procedimento_ano(
     year_values, month_values,
-    especialidade_values, pagamento_values,
+    tipo_atendimento_values, pagamento_values,
     profissional_values, segmento_values,
     todos_anos, todos_meses,
-    todos_especialidades, todos_pagamentos,
+    todos_tipos_atendimento, todos_pagamentos,
     todos_profissionais, todos_segmentos,
     data_inicial, data_final,
     theme_toggle
@@ -602,7 +475,7 @@ def update_atendimentos_por_procedimento_ano(
             else:
                 selected_months = [str(month) for month, checked in zip(range(1, 13), month_values) if checked]
         esp_ids = [item["id"]["index"] for item in ctx.inputs_list[2]]
-        selected_especialidades = [esp_id for esp_id, checked in zip(esp_ids, especialidade_values) if checked]
+        selected_tipos_atendimento = [esp_id for esp_id, checked in zip(esp_ids, tipo_atendimento_values) if checked]
         pag_ids = [item["id"]["index"] for item in ctx.inputs_list[3]]
         selected_pagamentos = [pag_id for pag_id, checked in zip(pag_ids, pagamento_values) if checked]
         prof_ids = [item["id"]["index"] for item in ctx.inputs_list[4]]
@@ -613,8 +486,8 @@ def update_atendimentos_por_procedimento_ano(
             selected_years = []
         if set(selected_months) == set([str(month) for month in range(1, 13)]):
             selected_months = []
-        if set(selected_especialidades) == set(esp_ids):
-            selected_especialidades = []
+        if set(selected_tipos_atendimento) == set(esp_ids):
+            selected_tipos_atendimento = []
         if set(selected_pagamentos) == set(pag_ids):
             selected_pagamentos = []
         if set(selected_profissionais) == set(prof_ids):
@@ -628,7 +501,7 @@ def update_atendimentos_por_procedimento_ano(
             group_fields=['ano'],
             anos=selected_years,
             meses=selected_months,
-            especialidades=selected_especialidades,
+            tipos_atendimento=selected_tipos_atendimento,
             formas_pagamento=selected_pagamentos,
             profissionais=selected_profissionais,
             segmentos=selected_segmentos,
@@ -705,10 +578,10 @@ def update_atendimentos_por_procedimento_ano(
 @log_tempo_callback
 def update_producao_bruta_por_ano(
     year_values, month_values,
-    especialidade_values, pagamento_values,
+    tipo_atendimento_values, pagamento_values,
     profissional_values, segmento_values,
     todos_anos, todos_meses,
-    todos_especialidades, todos_pagamentos,
+    todos_tipos_atendimento, todos_pagamentos,
     todos_profissionais, todos_segmentos,
     data_inicial, data_final,
     theme_toggle
@@ -728,7 +601,7 @@ def update_producao_bruta_por_ano(
             else:
                 selected_years = [str(year) for year, checked in zip(years, year_values) if checked]
         esp_ids = [item["id"]["index"] for item in ctx.inputs_list[2]]
-        selected_especialidades = [esp_id for esp_id, checked in zip(esp_ids, especialidade_values) if checked]
+        selected_tipos_atendimento = [esp_id for esp_id, checked in zip(esp_ids, tipo_atendimento_values) if checked]
         pag_ids = [item["id"]["index"] for item in ctx.inputs_list[3]]
         selected_pagamentos = [pag_id for pag_id, checked in zip(pag_ids, pagamento_values) if checked]
         prof_ids = [item["id"]["index"] for item in ctx.inputs_list[4]]
@@ -737,8 +610,8 @@ def update_producao_bruta_por_ano(
         selected_segmentos = [segm_id for segm_id, checked in zip(segm_ids, segmento_values) if checked]
         if set(selected_years) == set([str(year) for year in years]):
             selected_years = []
-        if set(selected_especialidades) == set(esp_ids):
-            selected_especialidades = []
+        if set(selected_tipos_atendimento) == set(esp_ids):
+            selected_tipos_atendimento = []
         if set(selected_pagamentos) == set(pag_ids):
             selected_pagamentos = []
         if set(selected_profissionais) == set(prof_ids):
@@ -751,7 +624,7 @@ def update_producao_bruta_por_ano(
         df = get_dados_agrupados(
             group_fields=['ano'],
             anos=selected_years,
-            especialidades=selected_especialidades,
+            tipos_atendimento=selected_tipos_atendimento,
             formas_pagamento=selected_pagamentos,
             profissionais=selected_profissionais,
             segmentos=selected_segmentos,
@@ -826,10 +699,10 @@ def update_producao_bruta_por_ano(
 @log_tempo_callback
 def update_producao_bruta_mensal(
     year_values, month_values,
-    especialidade_values, pagamento_values,
+    tipo_atendimento_values, pagamento_values,
     profissional_values, segmento_values,
     todos_anos, todos_meses,
-    todos_especialidades, todos_pagamentos,
+    todos_tipos_atendimento, todos_pagamentos,
     todos_profissionais, todos_segmentos,
     data_inicial, data_final,
     theme_toggle
@@ -857,7 +730,7 @@ def update_producao_bruta_mensal(
             else:
                 selected_months = [str(month) for month, checked in zip(range(1, 13), month_values) if checked]
         esp_ids = [item["id"]["index"] for item in ctx.inputs_list[2]]
-        selected_especialidades = [esp_id for esp_id, checked in zip(esp_ids, especialidade_values) if checked]
+        selected_tipos_atendimento = [esp_id for esp_id, checked in zip(esp_ids, tipo_atendimento_values) if checked]
         pag_ids = [item["id"]["index"] for item in ctx.inputs_list[3]]
         selected_pagamentos = [pag_id for pag_id, checked in zip(pag_ids, pagamento_values) if checked]
         prof_ids = [item["id"]["index"] for item in ctx.inputs_list[4]]
@@ -868,8 +741,8 @@ def update_producao_bruta_mensal(
             selected_years = []
         if set(selected_months) == set([str(month) for month in range(1, 13)]):
             selected_months = []
-        if set(selected_especialidades) == set(esp_ids):
-            selected_especialidades = []
+        if set(selected_tipos_atendimento) == set(esp_ids):
+            selected_tipos_atendimento = []
         if set(selected_pagamentos) == set(pag_ids):
             selected_pagamentos = []
         if set(selected_profissionais) == set(prof_ids):
@@ -883,7 +756,7 @@ def update_producao_bruta_mensal(
             group_fields=['ano', 'mes'],
             anos=selected_years,
             meses=selected_months,
-            especialidades=selected_especialidades,
+            tipos_atendimento=selected_tipos_atendimento,
             formas_pagamento=selected_pagamentos,
             profissionais=selected_profissionais,
             segmentos=selected_segmentos,
@@ -1018,10 +891,10 @@ def update_ticket_medio_por_procedimento_ano(dados_filtrados_json, theme_toggle)
 @log_tempo_callback
 def update_producao_bruta_mensal(
     year_values, month_values,
-    especialidade_values, pagamento_values,
+    tipo_atendimento_values, pagamento_values,
     profissional_values, segmento_values,
     todos_anos, todos_meses,
-    todos_especialidades, todos_pagamentos,
+    todos_tipos_atendimento, todos_pagamentos,
     todos_profissionais, todos_segmentos,
     data_inicial, data_final,
     theme_toggle
@@ -1049,7 +922,7 @@ def update_producao_bruta_mensal(
             else:
                 selected_months = [str(month) for month, checked in zip(range(1, 13), month_values) if checked]
         esp_ids = [item["id"]["index"] for item in ctx.inputs_list[2]]
-        selected_especialidades = [esp_id for esp_id, checked in zip(esp_ids, especialidade_values) if checked]
+        selected_tipos_atendimento = [esp_id for esp_id, checked in zip(esp_ids, tipo_atendimento_values) if checked]
         pag_ids = [item["id"]["index"] for item in ctx.inputs_list[3]]
         selected_pagamentos = [pag_id for pag_id, checked in zip(pag_ids, pagamento_values) if checked]
         prof_ids = [item["id"]["index"] for item in ctx.inputs_list[4]]
@@ -1060,8 +933,8 @@ def update_producao_bruta_mensal(
             selected_years = []
         if set(selected_months) == set([str(month) for month in range(1, 13)]):
             selected_months = []
-        if set(selected_especialidades) == set(esp_ids):
-            selected_especialidades = []
+        if set(selected_tipos_atendimento) == set(esp_ids):
+            selected_tipos_atendimento = []
         if set(selected_pagamentos) == set(pag_ids):
             selected_pagamentos = []
         if set(selected_profissionais) == set(prof_ids):
@@ -1075,7 +948,7 @@ def update_producao_bruta_mensal(
             group_fields=['ano', 'mes'],
             anos=selected_years,
             meses=selected_months,
-            especialidades=selected_especialidades,
+            tipos_atendimento=selected_tipos_atendimento,
             formas_pagamento=selected_pagamentos,
             profissionais=selected_profissionais,
             segmentos=selected_segmentos,
@@ -1142,10 +1015,10 @@ def update_producao_bruta_mensal(
 @log_tempo_callback
 def update_grafico_relacao_procedimentos_por_atendimento_ano(
     year_values, month_values,
-    especialidade_values, pagamento_values,
+    tipo_atendimento_values, pagamento_values,
     profissional_values, segmento_values,
     todos_anos, todos_meses,
-    todos_especialidades, todos_pagamentos,
+    todos_tipos_atendimento, todos_pagamentos,
     todos_profissionais, todos_segmentos,
     data_inicial, data_final,
     theme_toggle
@@ -1172,7 +1045,7 @@ def update_grafico_relacao_procedimentos_por_atendimento_ano(
             else:
                 selected_months = [str(month) for month, checked in zip(range(1, 13), month_values) if checked]
         esp_ids = [item["id"]["index"] for item in ctx.inputs_list[2]]
-        selected_especialidades = [esp_id for esp_id, checked in zip(esp_ids, especialidade_values) if checked]
+        selected_tipos_atendimento = [esp_id for esp_id, checked in zip(esp_ids, tipo_atendimento_values) if checked]
         pag_ids = [item["id"]["index"] for item in ctx.inputs_list[3]]
         selected_pagamentos = [pag_id for pag_id, checked in zip(pag_ids, pagamento_values) if checked]
         prof_ids = [item["id"]["index"] for item in ctx.inputs_list[4]]
@@ -1183,8 +1056,8 @@ def update_grafico_relacao_procedimentos_por_atendimento_ano(
             selected_years = []
         if set(selected_months) == set([str(month) for month in range(1, 13)]):
             selected_months = []
-        if set(selected_especialidades) == set(esp_ids):
-            selected_especialidades = []
+        if set(selected_tipos_atendimento) == set(esp_ids):
+            selected_tipos_atendimento = []
         if set(selected_pagamentos) == set(pag_ids):
             selected_pagamentos = []
         if set(selected_profissionais) == set(prof_ids):
@@ -1198,7 +1071,7 @@ def update_grafico_relacao_procedimentos_por_atendimento_ano(
             group_fields=['ano'],
             anos=selected_years,
             meses=selected_months,
-            especialidades=selected_especialidades,
+            tipos_atendimento=selected_tipos_atendimento,
             formas_pagamento=selected_pagamentos,
             profissionais=selected_profissionais,
             segmentos=selected_segmentos,
@@ -1417,10 +1290,10 @@ def update_grafico_ticket_medio_vs_quantidade_atendimentos_ano(dados_filtrados_j
 @log_tempo_callback
 def update_grid_producao_bruta_por_medico_ano(
     year_values, month_values,
-    especialidade_values, pagamento_values,
+    tipo_atendimento_values, pagamento_values,
     profissional_values, segmento_values,
     todos_anos, todos_meses,
-    todos_especialidades, todos_pagamentos,
+    todos_tipos_atendimento, todos_pagamentos,
     todos_profissionais, todos_segmentos,
     data_inicial, data_final,
     theme_toggle
@@ -1447,7 +1320,7 @@ def update_grid_producao_bruta_por_medico_ano(
             else:
                 selected_months = [str(month) for month, checked in zip(range(1, 13), month_values) if checked]
         esp_ids = [item["id"]["index"] for item in ctx.inputs_list[2]]
-        selected_especialidades = [esp_id for esp_id, checked in zip(esp_ids, especialidade_values) if checked]
+        selected_tipos_atendimento = [esp_id for esp_id, checked in zip(esp_ids, tipo_atendimento_values) if checked]
         pag_ids = [item["id"]["index"] for item in ctx.inputs_list[3]]
         selected_pagamentos = [pag_id for pag_id, checked in zip(pag_ids, pagamento_values) if checked]
         prof_ids = [item["id"]["index"] for item in ctx.inputs_list[4]]
@@ -1458,8 +1331,8 @@ def update_grid_producao_bruta_por_medico_ano(
             selected_years = []
         if set(selected_months) == set([str(month) for month in range(1, 13)]):
             selected_months = []
-        if set(selected_especialidades) == set(esp_ids):
-            selected_especialidades = []
+        if set(selected_tipos_atendimento) == set(esp_ids):
+            selected_tipos_atendimento = []
         if set(selected_pagamentos) == set(pag_ids):
             selected_pagamentos = []
         if set(selected_profissionais) == set(prof_ids):
@@ -1473,7 +1346,7 @@ def update_grid_producao_bruta_por_medico_ano(
             group_fields=['profissional', 'ano'],
             anos=selected_years,
             meses=selected_months,
-            especialidades=selected_especialidades,
+            tipos_atendimento=selected_tipos_atendimento,
             formas_pagamento=selected_pagamentos,
             profissionais=selected_profissionais,
             segmentos=selected_segmentos,
@@ -1535,10 +1408,10 @@ def update_grid_producao_bruta_por_medico_ano(
 @log_tempo_callback
 def update_grid_procedimentos_por_medico_ano(
     year_values, month_values,
-    especialidade_values, pagamento_values,
+    tipo_atendimento_values, pagamento_values,
     profissional_values, segmento_values,
     todos_anos, todos_meses,
-    todos_especialidades, todos_pagamentos,
+    todos_tipos_atendimento, todos_pagamentos,
     todos_profissionais, todos_segmentos,
     data_inicial, data_final,
     theme_toggle
@@ -1565,7 +1438,7 @@ def update_grid_procedimentos_por_medico_ano(
             else:
                 selected_months = [str(month) for month, checked in zip(range(1, 13), month_values) if checked]
         esp_ids = [item["id"]["index"] for item in ctx.inputs_list[2]]
-        selected_especialidades = [esp_id for esp_id, checked in zip(esp_ids, especialidade_values) if checked]
+        selected_tipos_atendimento = [esp_id for esp_id, checked in zip(esp_ids, tipo_atendimento_values) if checked]
         pag_ids = [item["id"]["index"] for item in ctx.inputs_list[3]]
         selected_pagamentos = [pag_id for pag_id, checked in zip(pag_ids, pagamento_values) if checked]
         prof_ids = [item["id"]["index"] for item in ctx.inputs_list[4]]
@@ -1576,8 +1449,8 @@ def update_grid_procedimentos_por_medico_ano(
             selected_years = []
         if set(selected_months) == set([str(month) for month in range(1, 13)]):
             selected_months = []
-        if set(selected_especialidades) == set(esp_ids):
-            selected_especialidades = []
+        if set(selected_tipos_atendimento) == set(esp_ids):
+            selected_tipos_atendimento = []
         if set(selected_pagamentos) == set(pag_ids):
             selected_pagamentos = []
         if set(selected_profissionais) == set(prof_ids):
@@ -1591,13 +1464,13 @@ def update_grid_procedimentos_por_medico_ano(
             group_fields=['profissional', 'ano'],
             anos=selected_years,
             meses=selected_months,
-            especialidades=selected_especialidades,
+            tipos_atendimento=selected_tipos_atendimento,
             formas_pagamento=selected_pagamentos,
             profissionais=selected_profissionais,
             segmentos=selected_segmentos,
             data_inicial=data_inicial_iso,
             data_final=data_final_iso,
-            agregacoes={'item': 'COUNT'}
+            agregacoes={'item': 'COUNT', 'tipo_atendimento': 'COUNT(DISTINCT)'}
         )
         if df.empty:
             return dash_table.DataTable(
@@ -1651,10 +1524,10 @@ def update_grid_procedimentos_por_medico_ano(
 @log_tempo_callback
 def update_grid_ticket_medio_por_medico_ano(
     year_values, month_values,
-    especialidade_values, pagamento_values,
+    tipo_atendimento_values, pagamento_values,
     profissional_values, segmento_values,
     todos_anos, todos_meses,
-    todos_especialidades, todos_pagamentos,
+    todos_tipos_atendimento, todos_pagamentos,
     todos_profissionais, todos_segmentos,
     data_inicial, data_final,
     theme_toggle
@@ -1681,7 +1554,7 @@ def update_grid_ticket_medio_por_medico_ano(
             else:
                 selected_months = [str(month) for month, checked in zip(range(1, 13), month_values) if checked]
         esp_ids = [item["id"]["index"] for item in ctx.inputs_list[2]]
-        selected_especialidades = [esp_id for esp_id, checked in zip(esp_ids, especialidade_values) if checked]
+        selected_tipos_atendimento = [esp_id for esp_id, checked in zip(esp_ids, tipo_atendimento_values) if checked]
         pag_ids = [item["id"]["index"] for item in ctx.inputs_list[3]]
         selected_pagamentos = [pag_id for pag_id, checked in zip(pag_ids, pagamento_values) if checked]
         prof_ids = [item["id"]["index"] for item in ctx.inputs_list[4]]
@@ -1692,8 +1565,8 @@ def update_grid_ticket_medio_por_medico_ano(
             selected_years = []
         if set(selected_months) == set([str(month) for month in range(1, 13)]):
             selected_months = []
-        if set(selected_especialidades) == set(esp_ids):
-            selected_especialidades = []
+        if set(selected_tipos_atendimento) == set(esp_ids):
+            selected_tipos_atendimento = []
         if set(selected_pagamentos) == set(pag_ids):
             selected_pagamentos = []
         if set(selected_profissionais) == set(prof_ids):
@@ -1707,7 +1580,7 @@ def update_grid_ticket_medio_por_medico_ano(
             group_fields=['profissional', 'ano'],
             anos=selected_years,
             meses=selected_months,
-            especialidades=selected_especialidades,
+            tipos_atendimento=selected_tipos_atendimento,
             formas_pagamento=selected_pagamentos,
             profissionais=selected_profissionais,
             segmentos=selected_segmentos,
@@ -1780,7 +1653,7 @@ def update_grid_ticket_medio_por_medico_ano(
         return f"Erro: {str(e)}"
 
 # 1. Valor da Produção Bruta (R$) / Média dos meses selecionados
-def get_selected_filters(ctx, year_values, month_values, especialidade_values, pagamento_values, profissional_values, segmento_values, todos_anos, todos_meses, todos_especialidades, todos_pagamentos, todos_profissionais, todos_segmentos):
+def get_selected_filters(ctx, year_values, month_values, tipo_atendimento_values, pagamento_values, profissional_values, segmento_values, todos_anos, todos_meses, todos_tipos_atendimento, todos_pagamentos, todos_profissionais, todos_segmentos, segmentos_selecoes_store=None):
     years = get_years()
     if todos_anos:
         selected_years = [str(year) for year in years]
@@ -1790,27 +1663,27 @@ def get_selected_filters(ctx, year_values, month_values, especialidade_values, p
         selected_months = [str(month) for month in range(1, 13)]
     else:
         selected_months = [str(month) for month, checked in zip(range(1, 13), month_values) if checked] if month_values else []
+    # Mapear os IDs sanitizados de tipo_atendimento de volta para os nomes reais
+    from database.queries import get_tipos_atendimento
+    tipos_atendimento = get_tipos_atendimento()
+    id_to_nome = {sanitize_id(item['nome']): item['nome'] for item in tipos_atendimento}
     esp_ids = [item["id"]["index"] for item in ctx.inputs_list[2]]
-    selected_especialidades = [esp_id for esp_id, checked in zip(esp_ids, especialidade_values) if checked]
+    selected_tipos_atendimento = [id_to_nome[esp_id] for esp_id, checked in zip(esp_ids, tipo_atendimento_values) if checked and esp_id in id_to_nome]
     pag_ids = [item["id"]["index"] for item in ctx.inputs_list[3]]
     selected_pagamentos = [pag_id for pag_id, checked in zip(pag_ids, pagamento_values) if checked]
     prof_ids = [item["id"]["index"] for item in ctx.inputs_list[4]]
     selected_profissionais = [prof_id for prof_id, checked in zip(prof_ids, profissional_values) if checked]
-    segm_ids = [item["id"]["index"] for item in ctx.inputs_list[5]]
-    selected_segmentos = [segm_id for segm_id, checked in zip(segm_ids, segmento_values) if checked]
-    if set(selected_years) == set([str(year) for year in years]):
-        selected_years = []
-    if set(selected_months) == set([str(month) for month in range(1, 13)]):
-        selected_months = []
-    if set(selected_especialidades) == set(esp_ids):
-        selected_especialidades = []
-    if set(selected_pagamentos) == set(pag_ids):
-        selected_pagamentos = []
-    if set(selected_profissionais) == set(prof_ids):
-        selected_profissionais = []
-    if set(selected_segmentos) == set(segm_ids):
-        selected_segmentos = []
-    return selected_years, selected_months, selected_especialidades, selected_pagamentos, selected_profissionais, selected_segmentos
+    # SEGMENTOS: usar o store de seleções se fornecido
+    if segmentos_selecoes_store is not None:
+        segmentos = get_segmentos()
+        if not segmentos_selecoes_store or all(segmentos_selecoes_store.get(str(i), True) for i in range(len(segmentos))):
+            selected_segmentos = [segmento["nome"] for segmento in segmentos]
+        else:
+            selected_segmentos = [segmentos[int(idx)]["nome"] for idx, marcado in segmentos_selecoes_store.items() if marcado]
+    else:
+        segm_ids = [item["id"]["index"] for item in ctx.inputs_list[5]]
+        selected_segmentos = [segm_id for segm_id, checked in zip(segm_ids, segmento_values) if checked]
+    return selected_years, selected_months, selected_tipos_atendimento, selected_pagamentos, selected_profissionais, selected_segmentos
 
 
 
@@ -2480,3 +2353,214 @@ def update_grid_ticket_medio_por_medico_ano(dados_filtrados_json):
         style_cell={'textAlign': 'center', 'fontWeight': 'bold'},
         style_header={'backgroundColor': '#888', 'color': 'white', 'fontWeight': 'bold'}
     )
+
+@callback(
+    Output("segmentos-container", "children", allow_duplicate=True),
+    [Input("todos-segmentos-checkbox", "value")],
+    prevent_initial_call='initial_duplicate'
+)
+def renderizar_segmentos(todos_value):
+    from database.queries import get_segmentos
+    segmentos = get_segmentos()
+    checkboxes = []
+    for segmento in segmentos:
+        checkboxes.append(
+            dbc.Checkbox(
+                id={"type": "segmento-checkbox", "index": segmento["nome"]},
+                label=segmento["nome"],
+                value=True,
+                className="d-block"
+            )
+        )
+    return checkboxes
+
+@callback(
+    [Output({"type": "segmento-checkbox", "index": ALL}, "value"),
+     Output("todos-segmentos-checkbox", "value")],
+    [Input("todos-segmentos-checkbox", "value"),
+     Input({"type": "segmento-checkbox", "index": ALL}, "value")],
+    prevent_initial_call=False
+)
+def sync_segmentos_checkboxes(todos_value, segmento_values):
+    from dash import ctx
+    n = len(segmento_values)
+    trigger_id = ctx.triggered_id
+
+    def is_checked(val):
+        if isinstance(val, list):
+            return bool(val)
+        return bool(val)
+
+    todos_checked = is_checked(todos_value)
+
+    # Se o trigger foi o botão TODOS
+    if trigger_id == "todos-segmentos-checkbox":
+        if todos_checked:
+            return [True] * n, True
+        else:
+            return [False] * n, False
+
+    # Se o trigger foi algum checkbox individual
+    all_checked = all(is_checked(v) for v in segmento_values)
+    return segmento_values, all_checked
+
+# ... existing code ...
+# --- CALLBACKS DE PROCEDIMENTOS (migrados de pages/atendimentos.py) ---
+from dash import callback, Input, Output, State, ALL, html
+import dash_bootstrap_components as dbc
+
+PROCEDIMENTOS_PER_PAGE = 20
+
+def get_procedimentos():
+    from database.queries import get_procedimentos
+    return get_procedimentos()
+
+@callback(
+    Output("procedimentos-page-store", "data"),
+    [Input("procedimentos-anterior-btn", "n_clicks"),
+     Input("procedimentos-proxima-btn", "n_clicks")],
+    [State("procedimentos-page-store", "data")],
+    prevent_initial_call=False
+)
+def navegar_paginas_procedimentos(n_anterior, n_proxima, page_data):
+    page = page_data["page"] if page_data and "page" in page_data else 0
+    total_procedimentos = len(get_procedimentos())
+    n_pages = (total_procedimentos - 1) // PROCEDIMENTOS_PER_PAGE + 1
+    from dash import callback_context
+    changed_id = callback_context.triggered[0]["prop_id"].split(".")[0]
+    if changed_id == "procedimentos-anterior-btn" and page > 0:
+        page -= 1
+    elif changed_id == "procedimentos-proxima-btn" and page < n_pages-1:
+        page += 1
+    return {"page": page}
+
+@callback(
+    Output("procedimentos-container", "children"),
+    [Input("procedimentos-page-store", "data"),
+     Input("procedimentos-selecoes-store", "data")]
+)
+def renderizar_procedimentos(page_data, selecoes_store):
+    procedimentos = get_procedimentos()
+    total_procedimentos = len(procedimentos)
+    page = page_data.get("page", 0) if page_data else 0
+    start = page * PROCEDIMENTOS_PER_PAGE
+    end = min(start + PROCEDIMENTOS_PER_PAGE, total_procedimentos)
+
+    # Inicializa store se necessário
+    if not selecoes_store or len(selecoes_store) != total_procedimentos:
+        selecoes_store = {str(i): True for i in range(total_procedimentos)}
+    checkboxes = []
+    for idx in range(start, end):
+        procedimento = procedimentos[idx]
+        checkboxes.append(
+            dbc.Checkbox(
+                id={"type": "procedimento-checkbox", "index": idx},
+                label=procedimento["nome"],
+                value=selecoes_store.get(str(idx), True),
+                className="d-block"
+            )
+        )
+    n_pages = (total_procedimentos - 1) // PROCEDIMENTOS_PER_PAGE + 1
+    nav_buttons = dbc.Row([
+        dbc.Col(dbc.Button("Anterior", id="procedimentos-anterior-btn", n_clicks=0, disabled=page==0)),
+        dbc.Col(html.Span(f"Página {page+1} de {n_pages}")),
+        dbc.Col(dbc.Button("Próxima", id="procedimentos-proxima-btn", n_clicks=0, disabled=page==n_pages-1)),
+    ], className="mt-2 mb-2 g-2", justify="center")
+    return [*checkboxes, nav_buttons]
+
+
+
+@callback(
+    [Output({"type": "procedimento-checkbox", "index": ALL}, "value"),
+     Output("todos-procedimentos-checkbox", "value"),
+     Output("procedimentos-selecoes-store", "data", allow_duplicate=True)],
+    [Input("todos-procedimentos-checkbox", "value"),
+     Input({"type": "procedimento-checkbox", "index": ALL}, "value")],
+    [State("procedimentos-selecoes-store", "data"), 
+     State("procedimentos-page-store", "data")],
+    prevent_initial_call=True
+)
+def sync_procedimentos_checkboxes(todos_value, procedimento_values, selecoes_store, page_data):
+    from dash import ctx
+    import dash
+
+    # Obter lista completa de procedimentos
+    procedimentos = get_procedimentos()
+    total_procedimentos = len(procedimentos)
+
+    # Inicializar store se necessário
+    if not selecoes_store or len(selecoes_store) != total_procedimentos:
+        selecoes_store = {str(i): True for i in range(total_procedimentos)}
+    
+    # Obter página atual
+    page = page_data.get("page", 0) if page_data else 0
+    start = page * PROCEDIMENTOS_PER_PAGE
+    end = min(start + PROCEDIMENTOS_PER_PAGE, total_procedimentos)
+    
+    # Obter trigger
+    trigger_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else None
+
+    # Se o trigger foi o checkbox "TODOS"
+    if trigger_id == "todos-procedimentos-checkbox":
+        # Atualizar todos os itens no store com o valor do checkbox TODOS
+        novo_estado = todos_value if todos_value is not None else False
+        selecoes_store = {str(i): novo_estado for i in range(total_procedimentos)}
+        
+        # Retornar valores apenas para a página atual
+        page_values = [novo_estado] * (end - start)
+        
+        return page_values, novo_estado, selecoes_store
+    
+    # Se o trigger foi um checkbox individual
+    else:
+        # Atualizar store com os valores da página atual
+        if procedimento_values and len(procedimento_values) == (end - start):
+            for idx, val in enumerate(procedimento_values):
+                selecoes_store[str(start + idx)] = val
+        
+        # Verificar se todos estão marcados
+        todos_marcados = all(selecoes_store.values())
+        
+        # Obter valores atualizados para a página atual
+        page_values = [selecoes_store.get(str(i), False) for i in range(start, end)]
+        
+        return page_values, todos_marcados, selecoes_store
+
+
+@callback(
+    Output("segmentos-container", "children"),
+    [Input("todos-segmentos-checkbox", "value")],
+    prevent_initial_call=False
+)
+def renderizar_segmentos(todos_value):
+    from database.queries import get_segmentos
+    segmentos = get_segmentos()
+    checkboxes = []
+    for segmento in segmentos:
+        checkboxes.append(
+            dbc.Checkbox(
+                id={"type": "segmento-checkbox", "index": segmento["nome"]},
+                label=segmento["nome"],
+                value=True,
+                className="d-block"
+            )
+        )
+    return checkboxes
+
+@callback(
+    Output("tipos-atendimento-container", "children"),
+    [Input("todos-segmentos-checkbox", "value")],
+    prevent_initial_call=False
+)
+def renderizar_tipos_atendimento(todos_value):
+    tipos_atendimento = get_tipos_atendimento()
+    tipos_atendimento_checkboxes = [
+        dbc.Checkbox(
+            id={"type": "segmento-checkbox", "index": item['nome']},
+            label=item['nome'],
+            value=True if todos_value else False,
+            className="d-block"
+        ) for item in tipos_atendimento
+    ]
+    return html.Div(tipos_atendimento_checkboxes, id="tipos-atendimento-checkboxes-container")
+

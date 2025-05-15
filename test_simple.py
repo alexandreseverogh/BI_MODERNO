@@ -4,12 +4,12 @@ import psycopg2
 def test_simple_connection():
     try:
         # Tentar conexão básica
-        conn = psycopg2.connect(
-            host='localhost',
-            database='bi_gore',
-            user='postgres',
-            password='postgre123'
-        )
+       conn = psycopg2.connect(
+        host='srv659302.hstgr.cloud',
+        database='db_gore',
+        user='developer',
+        password=raw_password 
+    )
         
         # Testar uma query simples sem caracteres especiais
         cursor = conn.cursor()

@@ -1,14 +1,16 @@
+import pandas as pd
 from dash import html, dcc, callback, dash_table
-from dash.dependencies import Input, Output, ALL
+from dash.dependencies import Input, Output, ALL, State
 import dash_bootstrap_components as dbc
 from data.database import execute_query
-from database.queries import get_years, get_min_max_data_atendimento, get_dados_filtrados
+from database.queries import get_years, get_min_max_data_atendimento, get_dados_filtrados, get_segmentos, get_formas_pagamento, get_profissionais, get_tipos_atendimento, get_total_segmentos_distinct, get_total_procedimentos_distinct
 import calendar
 from dash_bootstrap_templates import ThemeSwitchAIO, load_figure_template
 import plotly.graph_objects as go
 import datetime
-import pandas as pd
 import io
+from dash import dcc, callback_context
+#import dash_core_components as dcc  # ou from dash import dcc, se for Dash 2.x
 
 # Adiciona estilo customizado para os checkboxes
 checkbox_style = {
@@ -82,37 +84,44 @@ def get_graph_theme_settings(toggle):
             "margin": {"t": 50, "l": 50, "r": 20, "b": 50}
         }
 
-def get_selected_filters(ctx, year_values, month_values, especialidade_values, pagamento_values, profissional_values, segmento_values, todos_anos, todos_meses, todos_especialidades, todos_pagamentos, todos_profissionais, todos_segmentos):
-    years = get_years()
+def get_selected_filters(ctx, year_values, month_values, pagamento_values, profissional_values, segmento_values, procedimento_values, todos_anos, todos_meses, todos_pagamentos, todos_profissionais, todos_segmentos, todos_procedimentos):
+    # ANOS: lógica simplificada
     if todos_anos:
-        selected_years = [str(year) for year in years]
+        selected_years = [str(year) for year in get_years()]
     else:
-        selected_years = [str(year) for year, checked in zip(years, year_values) if checked] if year_values else []
+        selected_years = [year_id for year_id, checked in zip([str(year) for year in get_years()], year_values) if checked]
+
+    # MESES: lógica simplificada
     if todos_meses:
         selected_months = [str(month) for month in range(1, 13)]
     else:
-        selected_months = [str(month) for month, checked in zip(range(1, 13), month_values) if checked] if month_values else []
-    esp_ids = [item["id"]["index"] for item in ctx.inputs_list[2]]
-    selected_especialidades = [esp_id for esp_id, checked in zip(esp_ids, especialidade_values) if checked]
-    pag_ids = [item["id"]["index"] for item in ctx.inputs_list[3]]
-    selected_pagamentos = [pag_id for pag_id, checked in zip(pag_ids, pagamento_values) if checked]
-    prof_ids = [item["id"]["index"] for item in ctx.inputs_list[4]]
-    selected_profissionais = [prof_id for prof_id, checked in zip(prof_ids, profissional_values) if checked]
-    segm_ids = [item["id"]["index"] for item in ctx.inputs_list[5]]
-    selected_segmentos = [segm_id for segm_id, checked in zip(segm_ids, segmento_values) if checked]
-    if set(selected_years) == set([str(year) for year in years]):
-        selected_years = []
-    if set(selected_months) == set([str(month) for month in range(1, 13)]):
-        selected_months = []
-    if set(selected_especialidades) == set(esp_ids):
-        selected_especialidades = []
-    if set(selected_pagamentos) == set(pag_ids):
-        selected_pagamentos = []
-    if set(selected_profissionais) == set(prof_ids):
-        selected_profissionais = []
-    if set(selected_segmentos) == set(segm_ids):
-        selected_segmentos = []
-    return selected_years, selected_months, selected_especialidades, selected_pagamentos, selected_profissionais, selected_segmentos
+        selected_months = [month_id for month_id, checked in zip([str(month) for month in range(1, 13)], month_values) if checked]
+
+    # PAGAMENTOS: lógica simplificada
+    if todos_pagamentos:
+        selected_pagamentos = [pagamento["nome"] for pagamento in get_formas_pagamento()]
+    else:
+        selected_pagamentos = [pag_id for pag_id, checked in zip([pag["nome"] for pag in get_formas_pagamento()], pagamento_values) if checked]
+
+    # PROFISSIONAIS: lógica simplificada
+    if todos_profissionais:
+        selected_profissionais = [profissional["nome"] for profissional in get_profissionais()]
+    else:
+        selected_profissionais = [prof_id for prof_id, checked in zip([prof["nome"] for prof in get_profissionais()], profissional_values) if checked]
+
+    # SEGMENTOS: lógica simplificada
+    if todos_segmentos:
+        selected_segmentos = [segmento["nome"] for segmento in get_segmentos()]
+    else:
+        selected_segmentos = [segm_id for segm_id, checked in zip([segm["nome"] for segm in get_segmentos()], segmento_values) if checked]
+
+    # PROCEDIMENTOS: lógica simplificada
+    if todos_procedimentos:
+        selected_procedimentos = [procedimento["nome"] for procedimento in get_procedimentos()]
+    else:
+        selected_procedimentos = [proc_id for proc_id, checked in zip([proc["nome"] for proc in get_procedimentos()], procedimento_values) if checked]
+
+    return selected_years, selected_months, selected_pagamentos, selected_profissionais, selected_segmentos, selected_procedimentos
 
 def converter_para_iso(data_str):
     if not data_str:
@@ -125,10 +134,19 @@ def converter_para_iso(data_str):
         except Exception:
             return None
 
+# Calcular tamanhos das listas de opções dos filtros apenas uma vez (estático)
+N_PAGAMENTOS = len(get_formas_pagamento())
+N_PROFISSIONAIS = len(get_profissionais())
+N_SEGMENTOS = get_total_segmentos_distinct()
+N_PROCEDIMENTOS = get_total_procedimentos_distinct()
+
 def layout():
     meses_abrev = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+    total_procedimentos = len(get_procedimentos())
     return html.Div(id="main-container", className="theme-light", children=[
         dcc.Store(id='dados-filtrados-store'),
+        dcc.Store(id="procedimentos-selecoes-store", data={str(i): True for i in range(total_procedimentos)}),
+        dcc.Store(id="procedimentos-page-store", data={"page": 0}),
         dbc.Container([
             # Linha de título principal com Theme Switch
             dbc.Row([
@@ -272,20 +290,24 @@ def layout():
                             html.Div([
                                 html.H4("PROCEDIMENTOS", id="procedimentos-title", className="mb-1 text-start fw-bold"),
                                 dbc.Checkbox(
-                                    id="todos-especialidades-checkbox",
+                                    id="todos-procedimentos-checkbox",
                                     label="TODOS",
                                     value=True,
                                     className="d-block mb-2 custom-checkbox"
                                 ),
                                 dbc.Button("Opções", 
-                                         id="collapse-especialidades-btn", 
+                                         id="collapse-procedimentos-btn", 
                                          color="secondary", 
                                          size="sm", 
                                          className="mb-2",
                                          n_clicks=0),
                                 dbc.Collapse(
-                                    html.Div(id="especialidades-container", style={"maxHeight": "200px", "overflowY": "auto"}),
-                                    id="collapse-especialidades", is_open=False
+                                    html.Div([
+                                        dbc.Button("Anterior", id="procedimentos-anterior-btn", color="secondary", size="sm", className="me-2"),
+                                        dbc.Button("Próxima", id="procedimentos-proxima-btn", color="secondary", size="sm"),
+                                        html.Div(id="procedimentos-container", style={"maxHeight": "200px", "overflowY": "auto"})
+                                    ]),
+                                    id="collapse-procedimentos", is_open=False
                                 )
                             ], style={"flex": "1", "minWidth": "0"}),
                             # Linha vertical
@@ -490,60 +512,110 @@ def update_theme(toggle):
     [
         Input({"type": "year-checkbox", "index": ALL}, "value"),
         Input({"type": "month-checkbox", "index": ALL}, "value"),
-        Input({"type": "especialidade-checkbox", "index": ALL}, "value"),
         Input({"type": "pagamento-checkbox", "index": ALL}, "value"),
         Input({"type": "profissional-checkbox", "index": ALL}, "value"),
         Input({"type": "segmento-checkbox", "index": ALL}, "value"),
+        Input({"type": "procedimento-checkbox", "index": ALL}, "value"),
         Input("todos-anos-checkbox", "value"),
         Input("todos-meses-checkbox", "value"),
-        Input("todos-especialidades-checkbox", "value"),
         Input("todos-pagamentos-checkbox", "value"),
         Input("todos-profissionais-checkbox", "value"),
-        Input("todos-segmentos-checkbox", "value"),
+        Input("todos-procedimentos-checkbox", "value"),
         Input("data_inicial", "date"),
         Input("data_final", "date"),
-    ]
+        Input("todos-segmentos-checkbox", "value")
+    ],
+    prevent_initial_call=False
 )
 def update_dados_filtrados_store(
-    year_values, month_values, especialidade_values, pagamento_values,
-    profissional_values, segmento_values,
-    todos_anos, todos_meses, todos_especialidades, todos_pagamentos,
-    todos_profissionais, todos_segmentos,
-    data_inicial, data_final
+    year_values, month_values, pagamento_values,
+    profissional_values, segmento_values, procedimento_values,
+    todos_anos, todos_meses, todos_pagamentos,
+    todos_profissionais, todos_procedimentos,
+    data_inicial, data_final,
+    todos_segmentos
 ):
     from dash import ctx
+    try:
+        years = get_years()
+        months = list(range(1, 13))
+        pagamentos = get_formas_pagamento()
+        profissionais = get_profissionais()
+        segmentos = get_segmentos()
+        procedimentos = get_procedimentos()
+        
+        # Se nenhum valor selecionado, retorna DataFrame vazio
+        if not year_values or len(year_values) != len(years) or all(v is None for v in year_values):
+            year_values = [True] * len(years)
+        if not month_values or len(month_values) != len(months) or all(v is None for v in month_values):
+            month_values = [True] * len(months)
+        if not pagamento_values or len(pagamento_values) != len(pagamentos) or all(v is None for v in pagamento_values):
+            pagamento_values = [True] * len(pagamentos)
+        if not profissional_values or len(profissional_values) != len(profissionais) or all(v is None for v in profissional_values):
+            profissional_values = [True] * len(profissionais)
+        if not segmento_values or len(segmento_values) != len(segmentos) or all(v is None for v in segmento_values):
+            segmento_values = [True] * len(segmentos)
+        if not procedimento_values or len(procedimento_values) != len(procedimentos) or all(v is None for v in procedimento_values):
+            procedimento_values = [True] * len(procedimentos)
 
-    # Se TODOS os checkboxes de algum filtro estiverem desmarcados, retorna DataFrame vazio
-    if (
-        year_values is not None and all(v is False for v in year_values)
-        or month_values is not None and all(v is False for v in month_values)
-        or especialidade_values is not None and all(v is False for v in especialidade_values)
-        or pagamento_values is not None and all(v is False for v in pagamento_values)
-        or profissional_values is not None and all(v is False for v in profissional_values)
-        or segmento_values is not None and all(v is False for v in segmento_values)
-    ):
+        print("[DEBUG] year_values:", year_values)
+        print("[DEBUG] month_values:", month_values)
+        print("[DEBUG] pagamento_values:", pagamento_values)
+        print("[DEBUG] profissional_values:", profissional_values)
+        print("[DEBUG] segmento_values:", segmento_values)
+        print("[DEBUG] procedimento_values:", procedimento_values)
+
+        selected_years, selected_months, selected_pagamentos, selected_profissionais, selected_segmentos, selected_procedimentos = get_selected_filters(
+            ctx, year_values, month_values, pagamento_values, profissional_values, segmento_values, procedimento_values,
+            todos_anos, todos_meses, todos_pagamentos,
+            todos_profissionais, todos_segmentos, todos_procedimentos
+        )
+
+        print("[DEBUG][callback] selected_years:", selected_years, "(len:", len(selected_years), ")")
+        print("[DEBUG][callback] selected_months:", selected_months, "(len:", len(selected_months), ")")
+        print("[DEBUG][callback] selected_pagamentos:", selected_pagamentos, "(len:", len(selected_pagamentos), ")")
+        print("[DEBUG][callback] selected_profissionais:", selected_profissionais, "(len:", len(selected_profissionais), ")")
+        print("[DEBUG][callback] selected_segmentos:", selected_segmentos, "(len:", len(selected_segmentos), ")")
+        print("[DEBUG][callback] selected_procedimentos:", selected_procedimentos, "(len:", len(selected_procedimentos), ")")
+
+        # NOVA LÓGICA: se qualquer filtro principal vier vazio, retorna DataFrame vazio
+        if (not selected_years or not selected_months or not selected_pagamentos or not selected_profissionais or not selected_segmentos or not selected_procedimentos):
+            print("[DEBUG] Algum filtro principal está vazio. Retornando DataFrame vazio.")
+            return pd.DataFrame().to_json(date_format='iso', orient='split')
+
+        data_inicial_iso = converter_para_iso(data_inicial)
+        data_final_iso = converter_para_iso(data_final)
+        print("[DEBUG] data_inicial_iso:", data_inicial_iso)
+        print("[DEBUG] data_final_iso:", data_final_iso)
+
+        df = get_dados_filtrados(
+            anos=selected_years,
+            meses=selected_months,
+            formas_pagamento=selected_pagamentos,
+            profissionais=selected_profissionais,
+            segmentos=selected_segmentos,
+            procedimentos=selected_procedimentos,
+            data_inicial=data_inicial_iso,
+            data_final=data_final_iso
+        )
+
+        print("[DEBUG] df shape:", df.shape if df is not None else None)
+        if df is not None:
+            print("[DEBUG] df head:\n", df.head())
+        if df is not None and not df.empty:
+            df['ano'] = df['ano_atendimento']
+            df['mes'] = df['mes_atendimento']
+            return df.to_json(date_format='iso', orient='split')
+        else:
+            print("[DEBUG] DataFrame está vazio após filtro.")
+            return pd.DataFrame().to_json(date_format='iso', orient='split')
+    except Exception as e:
+        print("[ERRO] Callback update_dados_filtrados_store falhou:", e)
+        import traceback; traceback.print_exc()
         return pd.DataFrame().to_json(date_format='iso', orient='split')
 
-    selected_years, selected_months, selected_especialidades, selected_pagamentos, selected_profissionais, selected_segmentos = get_selected_filters(
-        ctx, year_values, month_values, especialidade_values, pagamento_values, profissional_values, segmento_values,
-        todos_anos, todos_meses, todos_especialidades, todos_pagamentos, todos_profissionais, todos_segmentos
-    )
-    data_inicial_iso = converter_para_iso(data_inicial)
-    data_final_iso = converter_para_iso(data_final)
-    df = get_dados_filtrados(
-        anos=selected_years,
-        meses=selected_months,
-        especialidades=selected_especialidades,
-        formas_pagamento=selected_pagamentos,
-        profissionais=selected_profissionais,
-        segmentos=selected_segmentos,
-        data_inicial=data_inicial_iso,
-        data_final=data_final_iso
-    )
-    if df is not None and not df.empty:
-        df['ano'] = df['ano_atendimento']
-        df['mes'] = df['mes_atendimento']
-        return df.to_json(date_format='iso', orient='split')
-    else:
-        return pd.DataFrame().to_json(date_format='iso', orient='split')
+
+def get_procedimentos():
+    from database.queries import get_procedimentos
+    return get_procedimentos()
 

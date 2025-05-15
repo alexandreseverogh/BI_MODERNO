@@ -5,10 +5,10 @@ import psycopg2
 try:
     # Testar conexão com o nome correto do banco
     conn = psycopg2.connect(
-        host='localhost',
-        database='BI_GORE',  # Nome correto em maiúsculas como mostrado no \l
-        user='postgres',
-        password='postgre123'
+        host='srv659302.hstgr.cloud',
+        database='db_gore',  # Nome correto em maiúsculas como mostrado no \l
+        user='developer',
+        password='@*RGt0W871!d'
     )
     print("1. Conexão OK")
     
