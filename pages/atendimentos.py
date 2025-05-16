@@ -3,7 +3,7 @@ from dash import html, dcc, callback, dash_table
 from dash.dependencies import Input, Output, ALL, State
 import dash_bootstrap_components as dbc
 from data.database import execute_query
-from database.queries import get_years, get_min_max_data_atendimento, get_dados_filtrados, get_segmentos, get_formas_pagamento, get_profissionais, get_tipos_atendimento, get_total_segmentos_distinct, get_total_procedimentos_distinct
+from database.queries import get_years, get_min_max_data_atendimento, get_dados_filtrados, get_segmentos, get_formas_pagamento, get_profissionais, get_procedimentos, get_total_segmentos_distinct, get_total_procedimentos_distinct
 import calendar
 from dash_bootstrap_templates import ThemeSwitchAIO, load_figure_template
 import plotly.graph_objects as go

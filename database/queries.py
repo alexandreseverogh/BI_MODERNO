@@ -67,7 +67,7 @@ def get_years() -> List[int]:
     result = conn.execute(text(query))
     return [row[0] for row in result]
 
-def get_tipos_atendimento(anos: Optional[List[str]] = None, meses: Optional[List[str]] = None) -> List[dict]:
+def get_procedimentos(anos: Optional[List[str]] = None, meses: Optional[List[str]] = None) -> List[dict]:
     """Retorna lista de tipos de atendimento disponíveis no período"""
     query = """
     SELECT DISTINCT tipo_atendimento 
@@ -185,10 +185,10 @@ def build_filter_conditions(
     meses: Optional[List[str]] = None,
     formas_pagamento: Optional[List[str]] = None,
     profissionais: Optional[List[str]] = None,
+    procedimentos: Optional[List[str]] = None,
     segmentos: Optional[List[str]] = None,
     data_inicial: Optional[str] = None,
     data_final: Optional[str] = None,
-    procedimentos: Optional[List[str]] = None
 ) -> tuple:
     """Constrói as condições WHERE e parâmetros para as queries"""
     conditions = ["1=1"]  # Always true condition as base
@@ -200,51 +200,96 @@ def build_filter_conditions(
     if meses and len(meses) > 0:
         conditions.append("mes_atendimento = ANY(:meses)")
         params["meses"] = [int(mes) for mes in meses]
+
+    if procedimentos and len(procedimentos) > 0:
+        if all(e is None for e in procedimentos):
+            conditions.append("item IS NULL")
+        elif any(e is None for e in procedimentos):
+            conditions.append("(item = ANY(:procedimentos) OR item IS NULL)")
+            params["procedimentos"] = [e for e in procedimentos if e is not None]
+        else:
+            conditions.append("item = ANY(:procedimentos)")
+            params["procedimentos"] = procedimentos
+    if formas_pagamento and len(formas_pagamento) > 0:
+        if all(f is None for f in formas_pagamento):
+            conditions.append("forma_de_pagamento IS NULL")
+        elif any(f is None for f in formas_pagamento):
+            conditions.append("(forma_de_pagamento = ANY(:formas_pagamento) OR forma_de_pagamento IS NULL)")
+            params["formas_pagamento"] = [f for f in formas_pagamento if f is not None]
+        else:
+            conditions.append("forma_de_pagamento = ANY(:formas_pagamento)")
+            params["formas_pagamento"] = formas_pagamento
+    if profissionais and len(profissionais) > 0:
+        if all(p is None for p in profissionais):
+            conditions.append("profissional IS NULL")
+        elif any(p is None for p in profissionais):
+            conditions.append("(profissional = ANY(:profissionais) OR profissional IS NULL)")
+            params["profissionais"] = [p for p in profissionais if p is not None]
+        else:
+            conditions.append("profissional = ANY(:profissionais)")
+            params["profissionais"] = profissionais
     if segmentos and len(segmentos) > 0:
-        if 'Em Branco' in segmentos:
-            outros = [v for v in segmentos if v != 'Em Branco']
-            cond = "(tipo_atendimento IS NULL OR tipo_atendimento = '' OR tipo_atendimento = 'Em Branco'"
-            if outros:
-                cond += " OR tipo_atendimento = ANY(:segmentos)"
-                params["segmentos"] = outros
-            cond += ")"
-            conditions.append(cond)
+        if all(s is None for s in segmentos):
+            conditions.append("tipo_atendimento IS NULL")
+        elif any(s is None for s in segmentos):
+            conditions.append("(tipo_atendimento = ANY(:segmentos) OR tipo_atendimento IS NULL)")
+            params["segmentos"] = [s for s in segmentos if s is not None]
         else:
             conditions.append("tipo_atendimento = ANY(:segmentos)")
             params["segmentos"] = segmentos
-    if formas_pagamento and len(formas_pagamento) > 0:
-        conditions.append("forma_de_pagamento = ANY(:formas_pagamento)")
-        params["formas_pagamento"] = formas_pagamento
-    if profissionais and len(profissionais) > 0:
-        conditions.append("profissional = ANY(:profissionais)")
-        params["profissionais"] = profissionais
     if data_inicial:
         conditions.append("data_atendimento >= :data_inicial")
         params["data_inicial"] = data_inicial
     if data_final:
         conditions.append("data_atendimento <= :data_final")
         params["data_final"] = data_final
-    if procedimentos and len(procedimentos) > 0:
-        if 'Em Branco' in procedimentos:
-            outros = [v for v in procedimentos if v != 'Em Branco']
-            cond = "(item IS NULL OR item = '' OR item = 'Em Branco'"
-            if outros:
-                cond += " OR item = ANY(:procedimentos)"
-                params["procedimentos"] = outros
-            cond += ")"
-            conditions.append(cond)
-        else:
-            conditions.append("item = ANY(:procedimentos)")
-            params["procedimentos"] = procedimentos
-    where_clause = " AND ".join(conditions)
-    return where_clause, params
+    return " AND ".join(conditions), params
+
+#    if segmentos and len(segmentos) > 0:
+#        if 'Em Branco' in segmentos:
+#            outros = [v for v in segmentos if v != 'Em Branco']
+#            cond = "(tipo_atendimento IS NULL OR tipo_atendimento = '' OR tipo_atendimento = 'Em Branco'"
+#            if outros:
+#                cond += " OR tipo_atendimento = ANY(:segmentos)"
+#                params["segmentos"] = outros
+#            cond += ")"
+#            conditions.append(cond)
+#        else:
+#            conditions.append("tipo_atendimento = ANY(:segmentos)")
+#            params["segmentos"] = segmentos
+#    if formas_pagamento and len(formas_pagamento) > 0:
+#        conditions.append("forma_de_pagamento = ANY(:formas_pagamento)")
+#        params["formas_pagamento"] = formas_pagamento
+#    if profissionais and len(profissionais) > 0:
+#        conditions.append("profissional = ANY(:profissionais)")
+#        params["profissionais"] = profissionais
+#    if data_inicial:
+#        conditions.append("data_atendimento >= :data_inicial")
+#        params["data_inicial"] = data_inicial
+#    if data_final:
+#        conditions.append("data_atendimento <= :data_final")
+#        params["data_final"] = data_final
+#    if procedimentos and len(procedimentos) > 0:
+#        if 'Em Branco' in procedimentos:
+#            outros = [v for v in procedimentos if v != 'Em Branco']
+#            cond = "(item IS NULL OR item = '' OR item = 'Em Branco'"
+#            if outros:
+#                cond += " OR item = ANY(:procedimentos)"
+#                params["procedimentos"] = outros
+#            cond += ")"
+#            conditions.append(cond)
+#        else:
+#            conditions.append("item = ANY(:procedimentos)")
+#            params["procedimentos"] = procedimentos
+#    where_clause = " AND ".join(conditions)
+#    return where_clause, params
 
 def get_total_atendimentos(
     anos: Optional[List[str]] = None,
     meses: Optional[List[str]] = None,
-    tipos_atendimento: Optional[List[str]] = None,
     formas_pagamento: Optional[List[str]] = None,
     profissionais: Optional[List[str]] = None,
+    procedimentos: Optional[List[str]] = None,
     segmentos: Optional[List[str]] = None,
     data_inicial: Optional[str] = None,
     data_final: Optional[str] = None
@@ -252,7 +297,7 @@ def get_total_atendimentos(
     """Retorna o total de atendimentos únicos (tipo_atendimento) com os filtros aplicados"""
     where_clause, params = build_filter_conditions(
         anos, meses, formas_pagamento,
-        profissionais, segmentos, data_inicial, data_final
+        profissionais, procedimentos, segmentos, data_inicial, data_final
     )
     query = f"""
     SELECT COUNT(DISTINCT tipo_atendimento) as total
@@ -266,9 +311,9 @@ def get_total_atendimentos(
 def get_valor_total(
     anos: Optional[List[str]] = None,
     meses: Optional[List[str]] = None,
-    tipos_atendimento: Optional[List[str]] = None,
     formas_pagamento: Optional[List[str]] = None,
     profissionais: Optional[List[str]] = None,
+    procedimentos: Optional[List[str]] = None,
     segmentos: Optional[List[str]] = None,
     data_inicial: Optional[str] = None,
     data_final: Optional[str] = None
@@ -276,7 +321,7 @@ def get_valor_total(
     """Retorna o valor total dos atendimentos com os filtros aplicados"""
     where_clause, params = build_filter_conditions(
         anos, meses, formas_pagamento,
-        profissionais, segmentos, data_inicial, data_final
+        profissionais, procedimentos, segmentos, data_inicial, data_final
     )
     query = f"""
     SELECT COALESCE(SUM(valor_total_unico), 0) as total
@@ -290,28 +335,28 @@ def get_valor_total(
 def get_ticket_medio(
     anos: Optional[List[str]] = None,
     meses: Optional[List[str]] = None,
-    tipos_atendimento: Optional[List[str]] = None,
     formas_pagamento: Optional[List[str]] = None,
     profissionais: Optional[List[str]] = None,
+    procedimentos: Optional[List[str]] = None,
     segmentos: Optional[List[str]] = None
 ) -> float:
     """Retorna o ticket médio dos atendimentos com os filtros aplicados"""
     total = get_valor_total(
         anos, meses, formas_pagamento,
-        profissionais, segmentos
+        profissionais, procedimentos, segmentos
     )
     count = get_total_atendimentos(
         anos, meses, formas_pagamento,
-        profissionais, segmentos
+        profissionais, procedimentos, segmentos
     )
     return total / count if count > 0 else 0
 
 def get_atendimentos_por_mes(
     anos: Optional[List[str]] = None,
     meses: Optional[List[str]] = None,
-    tipos_atendimento: Optional[List[str]] = None,
     formas_pagamento: Optional[List[str]] = None,
     profissionais: Optional[List[str]] = None,
+    procedimentos: Optional[List[str]] = None,
     segmentos: Optional[List[str]] = None,
     data_inicial: Optional[str] = None,
     data_final: Optional[str] = None
@@ -319,7 +364,7 @@ def get_atendimentos_por_mes(
     """Retorna dados de atendimentos agrupados por mês, considerando apenas atendimentos únicos (tipo_atendimento)"""
     where_clause, params = build_filter_conditions(
         anos, meses, formas_pagamento,
-        profissionais, segmentos, data_inicial, data_final
+        profissionais, procedimentos, segmentos, data_inicial, data_final
     )
     query = f"""
     SELECT 
@@ -348,9 +393,9 @@ def get_atendimentos_por_mes(
 def get_top_profissionais(
     anos: Optional[List[str]] = None,
     meses: Optional[List[str]] = None,
-    tipos_atendimento: Optional[List[str]] = None,
     formas_pagamento: Optional[List[str]] = None,
     profissionais: Optional[List[str]] = None,
+    procedimentos: Optional[List[str]] = None,
     segmentos: Optional[List[str]] = None,
     data_inicial: Optional[str] = None,
     data_final: Optional[str] = None,
@@ -359,7 +404,7 @@ def get_top_profissionais(
     """Retorna os top profissionais por número de atendimentos"""
     where_clause, params = build_filter_conditions(
         anos, meses, formas_pagamento,
-        profissionais, segmentos, data_inicial, data_final
+        profissionais, procedimentos, segmentos, data_inicial, data_final
     )
     params['limit'] = limit
     query = f"""
@@ -397,9 +442,9 @@ def get_min_max_data_atendimento():
 def get_atendimentos_por_medico_mes(
     anos: Optional[List[str]] = None,
     meses: Optional[List[str]] = None,
-    tipos_atendimento: Optional[List[str]] = None,
     formas_pagamento: Optional[List[str]] = None,
     profissionais: Optional[List[str]] = None,
+    procedimentos: Optional[List[str]] = None,
     segmentos: Optional[List[str]] = None,
     data_inicial: Optional[str] = None,
     data_final: Optional[str] = None
@@ -409,7 +454,7 @@ def get_atendimentos_por_medico_mes(
     """
     where_clause, params = build_filter_conditions(
         anos, meses, formas_pagamento,
-        profissionais, segmentos, data_inicial, data_final
+        profissionais, procedimentos, segmentos, data_inicial, data_final
     )
     query = f"""
     SELECT 
@@ -438,9 +483,9 @@ def get_atendimentos_por_medico_mes(
 def get_valor_total_por_medico_ano(
     anos: Optional[List[str]] = None,
     meses: Optional[List[str]] = None,
-    tipos_atendimento: Optional[List[str]] = None,
     formas_pagamento: Optional[List[str]] = None,
     profissionais: Optional[List[str]] = None,
+    procedimentos: Optional[List[str]] = None,
     segmentos: Optional[List[str]] = None,
     data_inicial: Optional[str] = None,
     data_final: Optional[str] = None
@@ -450,7 +495,7 @@ def get_valor_total_por_medico_ano(
     """
     where_clause, params = build_filter_conditions(
         anos, meses, formas_pagamento,
-        profissionais, segmentos, data_inicial, data_final
+        profissionais, procedimentos,segmentos, data_inicial, data_final
     )
     query = f"""
     SELECT 
@@ -479,9 +524,9 @@ def get_valor_total_por_medico_ano(
 def get_quantidade_total_por_medico_ano(
     anos: Optional[List[str]] = None,
     meses: Optional[List[str]] = None,
-    tipos_atendimento: Optional[List[str]] = None,
     formas_pagamento: Optional[List[str]] = None,
     profissionais: Optional[List[str]] = None,
+    procedimentos: Optional[List[str]] = None,
     segmentos: Optional[List[str]] = None,
     data_inicial: Optional[str] = None,
     data_final: Optional[str] = None
@@ -491,7 +536,7 @@ def get_quantidade_total_por_medico_ano(
     """
     where_clause, params = build_filter_conditions(
         anos, meses, formas_pagamento,
-        profissionais, segmentos, data_inicial, data_final
+        profissionais, procedimentos,segmentos, data_inicial, data_final
     )
     query = f"""
     SELECT 
@@ -518,9 +563,9 @@ def get_quantidade_total_por_medico_ano(
 def get_atendimentos_por_tipo_atendimento_ano(
     anos: Optional[List[str]] = None,
     meses: Optional[List[str]] = None,
-    tipos_atendimento: Optional[List[str]] = None,
     formas_pagamento: Optional[List[str]] = None,
     profissionais: Optional[List[str]] = None,
+    procedimentos: Optional[List[str]] = None,
     segmentos: Optional[List[str]] = None,
     data_inicial: Optional[str] = None,
     data_final: Optional[str] = None
@@ -530,7 +575,7 @@ def get_atendimentos_por_tipo_atendimento_ano(
     """
     where_clause, params = build_filter_conditions(
         anos, meses, formas_pagamento,
-        profissionais, segmentos, data_inicial, data_final
+        profissionais, procedimentos, segmentos, data_inicial, data_final
     )
     query = f"""
     SELECT 
@@ -557,9 +602,9 @@ def get_atendimentos_por_tipo_atendimento_ano(
 def get_atendimentos_por_ano(
     anos: Optional[List[str]] = None,
     meses: Optional[List[str]] = None,
-    tipos_atendimento: Optional[List[str]] = None,
     formas_pagamento: Optional[List[str]] = None,
     profissionais: Optional[List[str]] = None,
+    procedimentos: Optional[List[str]] = None,
     segmentos: Optional[List[str]] = None,
     data_inicial: Optional[str] = None,
     data_final: Optional[str] = None
@@ -569,7 +614,7 @@ def get_atendimentos_por_ano(
     """
     where_clause, params = build_filter_conditions(
         anos, meses, formas_pagamento,
-        profissionais, segmentos, data_inicial, data_final
+        profissionais, procedimentos, segmentos, data_inicial, data_final
     )
     query = f"""
     SELECT 
@@ -594,9 +639,9 @@ def get_atendimentos_por_ano(
 def get_total_procedimentos(
     anos: Optional[List[str]] = None,
     meses: Optional[List[str]] = None,
-    tipos_atendimento: Optional[List[str]] = None,
     formas_pagamento: Optional[List[str]] = None,
     profissionais: Optional[List[str]] = None,
+    procedimentos: Optional[List[str]] = None,
     segmentos: Optional[List[str]] = None,
     data_inicial: Optional[str] = None,
     data_final: Optional[str] = None
@@ -604,7 +649,7 @@ def get_total_procedimentos(
     """Retorna o total de procedimentos (soma das ocorrências do campo item) com os filtros aplicados"""
     where_clause, params = build_filter_conditions(
         anos, meses, formas_pagamento,
-        profissionais, segmentos, data_inicial, data_final
+        profissionais, procedimentos, segmentos, data_inicial, data_final
     )
     query = f"""
     SELECT COUNT(item) as total
@@ -618,9 +663,9 @@ def get_total_procedimentos(
 def get_total_procedimentos_por_ano(
     anos: Optional[List[str]] = None,
     meses: Optional[List[str]] = None,
-    tipos_atendimento: Optional[List[str]] = None,
     formas_pagamento: Optional[List[str]] = None,
     profissionais: Optional[List[str]] = None,
+    procedimentos: Optional[List[str]] = None,
     segmentos: Optional[List[str]] = None,
     data_inicial: Optional[str] = None,
     data_final: Optional[str] = None
@@ -630,7 +675,7 @@ def get_total_procedimentos_por_ano(
     """
     where_clause, params = build_filter_conditions(
         anos, meses, formas_pagamento,
-        profissionais, segmentos, data_inicial, data_final
+        profissionais, procedimentos, segmentos, data_inicial, data_final
     )
     query = f"""
     SELECT 
@@ -655,9 +700,9 @@ def get_total_procedimentos_por_ano(
 def get_procedimentos_por_medico_ano(
     anos: Optional[List[str]] = None,
     meses: Optional[List[str]] = None,
-    tipos_atendimento: Optional[List[str]] = None,
     formas_pagamento: Optional[List[str]] = None,
     profissionais: Optional[List[str]] = None,
+    procedimentos: Optional[List[str]] = None,
     segmentos: Optional[List[str]] = None,
     data_inicial: Optional[str] = None,
     data_final: Optional[str] = None
@@ -667,7 +712,7 @@ def get_procedimentos_por_medico_ano(
     """
     where_clause, params = build_filter_conditions(
         anos, meses, formas_pagamento,
-        profissionais, segmentos, data_inicial, data_final
+        profissionais, procedimentos, segmentos, data_inicial, data_final
     )
     query = f"""
     SELECT 
@@ -694,11 +739,10 @@ def get_procedimentos_por_medico_ano(
 def get_dados_filtrados(
     anos: Optional[List[str]] = None,
     meses: Optional[List[str]] = None,
-    tipos_atendimento: Optional[List[str]] = None,
     formas_pagamento: Optional[List[str]] = None,
     profissionais: Optional[List[str]] = None,
-    segmentos: Optional[List[str]] = None,
     procedimentos: Optional[List[str]] = None,
+    segmentos: Optional[List[str]] = None,
     data_inicial: Optional[str] = None,
     data_final: Optional[str] = None
 ) -> pd.DataFrame:
@@ -707,8 +751,7 @@ def get_dados_filtrados(
     """
     where_clause, params = build_filter_conditions(
         anos, meses, formas_pagamento,
-        profissionais, segmentos, data_inicial, data_final,
-        procedimentos=procedimentos
+        profissionais, procedimentos, segmentos, data_inicial, data_final
     )
     query = f'''
         SELECT
@@ -716,10 +759,10 @@ def get_dados_filtrados(
             ano_atendimento,
             mes_atendimento,
             codigo_atendimento,
+            forma_de_pagamento,
             profissional,
             item,
             tipo_atendimento,
-            forma_de_pagamento,
             valor_total_unico
         FROM dados_bi_gore
         WHERE {where_clause}
@@ -727,11 +770,10 @@ def get_dados_filtrados(
     conn = get_conn()
     print('[DEBUG][get_dados_filtrados] anos:', anos)
     print('[DEBUG][get_dados_filtrados] meses:', meses)
-    print('[DEBUG][get_dados_filtrados] tipos_atendimento:', tipos_atendimento)
     print('[DEBUG][get_dados_filtrados] formas_pagamento:', formas_pagamento)
     print('[DEBUG][get_dados_filtrados] profissionais:', profissionais)
-    print('[DEBUG][get_dados_filtrados] segmentos:', segmentos)
     print('[DEBUG][get_dados_filtrados] procedimentos:', procedimentos)
+    print('[DEBUG][get_dados_filtrados] segmentos:', segmentos)
     print('[DEBUG][get_dados_filtrados] data_inicial:', data_inicial)
     print('[DEBUG][get_dados_filtrados] data_final:', data_final)
     print('[DEBUG][get_dados_filtrados] SQL:', query)
@@ -748,9 +790,9 @@ def get_dados_agrupados(
     group_fields: list,
     anos: Optional[list] = None,
     meses: Optional[list] = None,
-    tipos_atendimento: Optional[list] = None,
     formas_pagamento: Optional[list] = None,
     profissionais: Optional[list] = None,
+    procedimentos: Optional[list] = None,
     segmentos: Optional[list] = None,
     data_inicial: Optional[str] = None,
     data_final: Optional[str] = None,
@@ -767,7 +809,8 @@ def get_dados_agrupados(
         'mes': "mes_atendimento as mes",
         'profissional': "profissional",
         'forma_de_pagamento': "forma_de_pagamento",
-        'tipo_atendimento': "tipo_atendimento"
+        'item': "item",
+        'tipo_atendimento': "tipo_atendimento",
     }
     select_fields = [field_map[f] for f in group_fields]
     group_by_fields = [f.split(' as ')[-1] for f in select_fields]
@@ -782,7 +825,7 @@ def get_dados_agrupados(
     group_by_clause = ', '.join(group_by_fields)
     where_clause, params = build_filter_conditions(
         anos, meses, formas_pagamento,
-        profissionais, segmentos, data_inicial, data_final
+        profissionais, procedimentos, segmentos, data_inicial, data_final
     )
     query = f"""
         SELECT {select_clause}
@@ -795,9 +838,9 @@ def get_dados_agrupados(
     print('[DEBUG][get_dados_agrupados] group_fields:', group_fields)
     print('[DEBUG][get_dados_agrupados] anos:', anos)
     print('[DEBUG][get_dados_agrupados] meses:', meses)
-    print('[DEBUG][get_dados_agrupados] tipos_atendimento:', tipos_atendimento)
     print('[DEBUG][get_dados_agrupados] formas_pagamento:', formas_pagamento)
     print('[DEBUG][get_dados_agrupados] profissionais:', profissionais)
+    print('[DEBUG][get_dados_agrupados] procedimentos:', procedimentos)
     print('[DEBUG][get_dados_agrupados] segmentos:', segmentos)
     print('[DEBUG][get_dados_agrupados] data_inicial:', data_inicial)
     print('[DEBUG][get_dados_agrupados] data_final:', data_final)
