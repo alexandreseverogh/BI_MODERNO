@@ -152,10 +152,10 @@ def display_page(pathname):
             html.P(str(e))
         ])
 
-if __name__ == '__main__':
-    print("Iniciando servidor...")
-    app.run(debug=True, port=8050)
-
 #if __name__ == '__main__':
 #    print("Iniciando servidor...")
-#    app.run(debug=True, port=8050, host='0.0.0.0')
+#    app.run(debug=True, port=8050)
+
+if __name__ == '__main__':
+    print("Iniciando servidor...")
+    app.run(debug=True, port=8050, host='0.0.0.0')
